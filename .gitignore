@@ -35,6 +35,11 @@ coverage.xml
 *.cover
 .hypothesis/
 
+# Linters / type checkers
+.ruff_cache/
+.mypy_cache/
+.pytype/
+
 # Editors
 .vscode/
 .idea/

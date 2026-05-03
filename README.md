@@ -13,7 +13,7 @@ git clone https://github.com/<your-org>/asof ~/.claude/skills/asof
 
 Then type `/asof:init` in any Claude Code session — a guided wizard handles the rest.
 
-> **Plugin distribution** (`claude plugin add ...`) lands when Claude Code's plugin marketplace stabilizes. The manual `git clone` above works on every Claude Code version today.
+> **Plugin marketplace install** (`claude plugin install asof@<marketplace>`) lands when `asof` is published to a marketplace. The manual `git clone` above works on every Claude Code version today.
 
 ## What you get
 
@@ -98,7 +98,7 @@ Each example has 3-5 source `.md` files plus the resulting wiki, lint-clean.
 
 ## Codex / OpenCode compatibility
 
-Claude Code's skill format follows the [Agent Skills](https://agentskills.io) open standard. `asof` should run in any compliant tool with no modification. Verified for Claude Code; spot-checked for others per release.
+Claude Code's skill format follows the [Agent Skills open standard](https://agentskills.io) (per the [official Claude Code skills documentation](https://code.claude.com/docs/en/skills)). `asof` is intended to be compatible with any compliant tool. Verified for Claude Code; spot-checked for others per release.
 
 ## Multi-user collaboration
 

@@ -8,13 +8,22 @@ with the additional schema-version semantics described below.
 
 ## Schema-version semantics
 
-`asof` ships with three version numbers in every config and plugin manifest:
+`asof` distinguishes two kinds of versions:
 
-- **`schema_version`** — the wiki-format version this skill was built for.
-- **`min_reader_version`** — the lowest skill version that can *read* a wiki of
-  this `schema_version` without error.
-- **`min_writer_version`** — the lowest skill version that can *write* (sync,
-  init, migrate) a wiki of this `schema_version`.
+- The **skill version** lives in the plugin manifest at
+  `.claude-plugin/plugin.json` (`version` field) and is what `git tag`s point
+  at. It tracks the code.
+- Three **schema-version fields** live in the wiki's own config at
+  `<wiki_dir>/.asof.json`. They track the wiki *format*, not the code:
+  - **`schema_version`** — the wiki-format version this wiki was written
+    against.
+  - **`min_reader_version`** — the lowest skill version that can *read* a wiki
+    of this `schema_version` without error.
+  - **`min_writer_version`** — the lowest skill version that can *write*
+    (sync, init, migrate) a wiki of this `schema_version`.
+
+The plugin manifest holds plugin metadata only (name, version, author, etc.).
+Schema versioning is a runtime concern of the wiki the skill operates on.
 
 The four-cell compatibility matrix governs every skill invocation
 (see [PLAN.md](PLAN.md) section 2):
