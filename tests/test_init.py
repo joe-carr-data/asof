@@ -178,10 +178,11 @@ def _stub_subprocess(monkeypatch: pytest.MonkeyPatch, returncode: int = 0) -> li
 
     def fake_run(args: list[str], **kwargs: Any):
         # init's first-sync call: [sys.executable, ".../sync.py", ...].
+        # Use Path.name for portable matching across POSIX / Windows.
         if (
             len(args) >= 2
             and args[0] == sys.executable
-            and str(args[1]).endswith("/sync.py")
+            and Path(str(args[1])).name == "sync.py"
         ):
             captured.append((args, kwargs))
             return FakeProc()

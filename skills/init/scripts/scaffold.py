@@ -364,7 +364,27 @@ def register_project_in_config(
                 f"{exc}. Fix it by hand (or delete and re-run /asof:init) "
                 "before adding a new project."
             ) from exc
-        if layout.pattern == "C" and wiki_cfg.projects:
+        # Layout/config shape mismatch (Codex round-2 MEDIUM): the existing
+        # config's pattern (derived from whether `wiki_dir` is present in the
+        # JSON) must match the requested layout. Pointing a Pattern A/B init
+        # at a Pattern C config (or vice versa) would silently corrupt the
+        # invariants either side relies on (Pattern C committed-portably
+        # vs Pattern A/B with absolute paths).
+        existing_is_c = wiki_cfg.is_pattern_c
+        requested_is_c = layout.pattern == "C"
+        if existing_is_c != requested_is_c:
+            existing_label = "C" if existing_is_c else "A/B"
+            raise ScaffoldError(
+                f"asof:init: existing config at {config_path!s} is a Pattern "
+                f"{existing_label} wiki, but you requested Pattern "
+                f"{layout.pattern}. Pattern shape is fixed at bootstrap; "
+                "to switch patterns, move or delete the existing wiki first."
+            )
+        # Pattern C is single-project by design — one repo, one .asof/, one
+        # project. A second register would silently change the layout's
+        # invariants. Keyed off the *config* (is_pattern_c), which we now
+        # know matches the requested layout from the check above.
+        if existing_is_c and wiki_cfg.projects:
             existing = wiki_cfg.projects[0].name
             raise ScaffoldError(
                 f"asof:init: Pattern C wiki at {config_path!s} already has "

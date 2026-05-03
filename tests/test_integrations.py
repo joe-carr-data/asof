@@ -109,18 +109,34 @@ def test_snippet_appends_to_existing_claudemd(tmp_path: Path) -> None:
 def test_snippet_normalizes_trailing_newlines(tmp_path: Path) -> None:
     """Round-1 phase-3 LOW: existing file ending with multiple trailing
     newlines must produce exactly one blank line between content and
-    snippet, not 3+ newlines. Same for files ending with no newline."""
+    snippet, not 3+ newlines. Same for files ending with no newline.
+
+    Round-2 INFO: assert the boundary character-by-character relative to
+    SNIPPET_OPEN_MARKER's position, not by leading-prefix coincidence.
+    Robust against future template changes that move SNIPPET_OPEN_MARKER
+    away from the file start."""
     request = _build_request(tmp_path)
     target = request.project_root / "CLAUDE.md"
     # Pathological case: file already ends with "\n\n\n"
     target.write_text("Existing line.\n\n\n", encoding="utf-8")
     append_claudemd_snippet(request, today=TODAY, dry_run=False)
     text = target.read_text(encoding="utf-8")
-    # Exactly one blank line ("\n\n") between the existing content and the
-    # rendered snippet's first character. Triple-newlines would be visually
-    # messy in CLAUDE.md and were the bug Codex flagged.
-    assert text.startswith("Existing line.\n\n<!--")
-    assert "\n\n\n" not in text.split("Existing line.")[1].split("<!--")[0]
+    # Existing content preserved verbatim at the start, and the boundary
+    # between it and the rendered snippet is exactly "\n\n" (canonical
+    # one-blank-line separator). Find the marker and inspect the boundary.
+    idx = text.find(SNIPPET_OPEN_MARKER)
+    assert idx > 0, "SNIPPET_OPEN_MARKER must appear in the rendered output"
+    head = text[:idx]
+    # Existing content survives, no trailing-newline runaway, no extra
+    # leading content beyond the existing line.
+    assert head.startswith("Existing line.")
+    # Strip back the existing-content prefix; what's left is the
+    # rendered template's content from start up to SNIPPET_OPEN_MARKER.
+    prefix_after_existing = head[len("Existing line.") :]
+    # The boundary between existing content and rendered template must
+    # start with exactly two newlines (= one blank line) — never 3+.
+    assert prefix_after_existing.startswith("\n\n")
+    assert not prefix_after_existing.startswith("\n\n\n")
 
 
 def test_snippet_handles_missing_trailing_newline(tmp_path: Path) -> None:
@@ -130,7 +146,13 @@ def test_snippet_handles_missing_trailing_newline(tmp_path: Path) -> None:
     target.write_text("No-newline-tail.", encoding="utf-8")
     append_claudemd_snippet(request, today=TODAY, dry_run=False)
     text = target.read_text(encoding="utf-8")
-    assert text.startswith("No-newline-tail.\n\n<!--")
+    idx = text.find(SNIPPET_OPEN_MARKER)
+    assert idx > 0
+    head = text[:idx]
+    assert head.startswith("No-newline-tail.")
+    prefix_after_existing = head[len("No-newline-tail.") :]
+    assert prefix_after_existing.startswith("\n\n")
+    assert not prefix_after_existing.startswith("\n\n\n")
 
 
 def test_snippet_skipped_when_open_marker_already_present(tmp_path: Path) -> None:

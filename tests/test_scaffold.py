@@ -425,6 +425,40 @@ def test_register_preserves_forward_compat_keys(tmp_path: Path) -> None:
 # ─── round-1 phase-3 HIGH 4: Pattern C is single-project ──────────────────
 
 
+def test_register_refuses_pattern_a_against_existing_pattern_c_config(
+    tmp_path: Path,
+) -> None:
+    """Round-2 MEDIUM: existing Pattern C config + requested Pattern A → reject.
+    Pattern shape is fixed at bootstrap; switching mid-flight would corrupt
+    the per-pattern invariants (Pattern C committed-portably without wiki_dir,
+    Pattern A/B with absolute wiki_dir + source)."""
+    # Bootstrap a Pattern C config first.
+    layout_c = _make_layout_c(tmp_path)
+    layout_c.wiki_dir.mkdir()
+    register_project_in_config(layout_c, "myrepo", dry_run=False)
+    # Now construct a Pattern A layout that aims at the SAME wiki_dir.
+    fake_source = tmp_path / "src"
+    fake_source.mkdir()
+    layout_a_against_c = WikiLayout(
+        pattern="A", wiki_dir=layout_c.wiki_dir, source=fake_source
+    )
+    with pytest.raises(ScaffoldError, match="Pattern shape is fixed"):
+        register_project_in_config(layout_a_against_c, "another", dry_run=False)
+
+
+def test_register_refuses_pattern_c_against_existing_pattern_a_config(
+    tmp_path: Path,
+) -> None:
+    """The reverse: existing Pattern A config + requested Pattern C → reject."""
+    layout_a = _make_layout_a(tmp_path)
+    layout_a.wiki_dir.mkdir()
+    register_project_in_config(layout_a, "first", dry_run=False)
+    # Construct a Pattern C layout aiming at the same wiki_dir.
+    layout_c_against_a = WikiLayout(pattern="C", wiki_dir=layout_a.wiki_dir)
+    with pytest.raises(ScaffoldError, match="Pattern shape is fixed"):
+        register_project_in_config(layout_c_against_a, "another", dry_run=False)
+
+
 def test_register_pattern_c_refuses_second_project(tmp_path: Path) -> None:
     """Pattern C wikis live at <repo>/.asof/ — one repo, one project. A
     second project would silently change the layout's invariants and

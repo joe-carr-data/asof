@@ -351,10 +351,30 @@ def _print_integration_summary(result: IntegrationResult) -> None:
         print("  ⚠ Some integrations failed (init continued — partial success):")
         for step_name, msg in result.errors:
             print(f"    ✗ {step_name}: {msg}")
+        print()
         print(
-            "    Re-run /asof:init for the failed step(s), or fix the "
-            "underlying issue (permissions, malformed JSON, etc.) and "
-            "re-run with the same project_name to retry."
+            "    Note: re-running /asof:init with the same project_name "
+            "will reject the duplicate project. Fix the underlying issue "
+            "(permissions, malformed JSON, etc.) then recover by step:"
+        )
+        print(
+            "      • CLAUDE.md snippet — copy the marker-fenced block from "
+            "<plugin>/templates/project_CLAUDE_snippet.md into "
+            f"{(result.settings_path.parent.parent if result.settings_path else 'PROJECT_ROOT')}/CLAUDE.md"
+        )
+        print(
+            "      • hook install — copy <plugin>/templates/hooks/"
+            "wiki_change_reminder.py into <project>/.claude/hooks/"
+            "asof_wiki_change_reminder.py (chmod 0755)"
+        )
+        print(
+            "      • settings update — edit "
+            f"{result.settings_path or '<project>/.claude/settings.local.json'} "
+            "by hand to add the wiki_dir + hook entry"
+        )
+        print(
+            "      • first sync — re-run /asof:sync (the project is already "
+            "registered; sync only needs the .asof.json that init wrote)"
         )
 
 
@@ -381,10 +401,22 @@ def _print_final_summary(
             "  • First sync failed — check the output above; you may need "
             "to re-run /asof:sync after fixing the issue."
         )
-    print(
-        "  • The agent will now read the wiki when answering project "
-        "questions (per the snippet appended to CLAUDE.md)."
-    )
+    if integration_result.snippet_appended:
+        print(
+            "  • The agent will now read the wiki when answering project "
+            "questions (per the snippet appended to CLAUDE.md)."
+        )
+    elif integration_result.snippet_skipped_already_present:
+        print(
+            "  • The agent will read the wiki when answering project "
+            "questions (CLAUDE.md snippet was already present)."
+        )
+    else:
+        print(
+            "  • To make the agent consult the wiki automatically, append "
+            "the snippet from <plugin>/templates/project_CLAUDE_snippet.md "
+            "to your project's CLAUDE.md."
+        )
 
 
 if __name__ == "__main__":
