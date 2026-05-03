@@ -30,6 +30,7 @@ from __future__ import annotations
 import argparse
 import datetime
 import sys
+from pathlib import Path
 
 from _sync_bridge import SKILL_VERSION, slugify
 from integrations import (
@@ -196,6 +197,26 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as exc:
         print(
             f"asof:init: invalid project_name {args.project_name!r}: {exc}",
+            file=sys.stderr,
+        )
+        return ExitCode.SCAFFOLD_ERROR
+
+    # source_path must exist as a directory before we kick off the wizard.
+    # Round-1 phase-3 MEDIUM: previously a non-existent / file source path
+    # passed through layout selection and only failed at scaffold time with
+    # a confusing "rsync: change_dir failed" or empty raw/ on first sync.
+    source = Path(args.source_path).expanduser()
+    if not source.exists():
+        print(
+            f"asof:init: source_path {source!s} does not exist. Pass an "
+            "existing directory (the source repo for Pattern A/B; the repo "
+            "root for Pattern C).",
+            file=sys.stderr,
+        )
+        return ExitCode.SCAFFOLD_ERROR
+    if not source.is_dir():
+        print(
+            f"asof:init: source_path {source!s} is not a directory.",
             file=sys.stderr,
         )
         return ExitCode.SCAFFOLD_ERROR

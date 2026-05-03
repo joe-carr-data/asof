@@ -178,6 +178,37 @@ def atomic_write_json(path: Path | str, data: Any) -> None:
         raise
 
 
+def atomic_write_text(path: Path | str, content: str) -> None:
+    """Write `content` to `path` as UTF-8 text atomically.
+
+    Same temp-then-rename pattern as `atomic_write_json` so a process kill
+    mid-write leaves either the old file or the new one — never a partial
+    half-written markdown / gitignore / CLAUDE.md. Creates parent dirs.
+
+    Codex round-1 phase-3 MEDIUM: scaffold.py's docstring promised every
+    write was atomic, but only the .asof.json went through the atomic
+    helper — the four bookkeeping templates, the wiki-root CLAUDE.md,
+    and the Pattern C .gitignore augment all used plain `Path.write_text`,
+    which on POSIX is two syscalls (open+truncate, then write). A SIGKILL
+    between those produced an empty file.
+    """
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(
+        prefix=f"{target.name}.",
+        suffix=".tmp",
+        dir=str(target.parent),
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(content)
+        Path(tmp).replace(target)
+    except Exception:
+        with contextlib.suppress(FileNotFoundError):
+            Path(tmp).unlink()
+        raise
+
+
 # ─── file lock ──────────────────────────────────────────────────────────────
 #
 # Sync and lint must not run concurrently against the same wiki dir

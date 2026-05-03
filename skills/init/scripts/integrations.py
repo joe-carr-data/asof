@@ -40,7 +40,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from _sync_bridge import atomic_write_json
+from _sync_bridge import atomic_write_json, atomic_write_text
 from scaffold import (
     load_template,
     render_template,
@@ -152,7 +152,7 @@ def append_claudemd_snippet(
         new_content = existing + "\n" + rendered
     else:
         new_content = rendered
-    target.write_text(new_content, encoding="utf-8")
+    atomic_write_text(target, new_content)
     return (True, False)
 
 

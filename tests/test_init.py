@@ -89,6 +89,36 @@ def test_invalid_project_name_errors(
     assert "invalid project_name" in err
 
 
+def test_nonexistent_source_path_errors_early(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Round-1 phase-3 MEDIUM: source_path must exist before stage 1 fires."""
+    rc = main([
+        "myproject",
+        str(tmp_path / "does-not-exist"),
+        "--non-interactive",
+    ])
+    assert rc == ExitCode.SCAFFOLD_ERROR
+    err = capsys.readouterr().err
+    assert "does not exist" in err
+
+
+def test_source_path_that_is_a_file_errors_early(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A file (not directory) at source_path must be rejected too."""
+    source_file = tmp_path / "not-a-dir.txt"
+    source_file.write_text("hello")
+    rc = main([
+        "myproject",
+        str(source_file),
+        "--non-interactive",
+    ])
+    assert rc == ExitCode.SCAFFOLD_ERROR
+    err = capsys.readouterr().err
+    assert "not a directory" in err
+
+
 # ─── preflight failure path ────────────────────────────────────────────────
 
 

@@ -38,6 +38,7 @@ from _sync_bridge import (
     SKILL_VERSION,
     ConfigError,
     atomic_write_json,
+    atomic_write_text,
     ensure_inside,
     extract_frontmatter,
     load_wiki_config,
@@ -317,7 +318,7 @@ def bootstrap_wiki_dir(
         )
         verify_substituted(rendered, claude_path)
         if not dry_run:
-            claude_path.write_text(rendered, encoding="utf-8")
+            atomic_write_text(claude_path, rendered)
         created.append(claude_path)
 
     return (not wiki_dir_existed, created, updated, skipped)
@@ -498,7 +499,7 @@ def augment_pattern_c_gitignore(
     )
 
     if not dry_run:
-        gitignore_path.write_text(new_content, encoding="utf-8")
+        atomic_write_text(gitignore_path, new_content)
     return (True, False)
 
 
@@ -540,7 +541,7 @@ def scaffold_project_pages(
         verify_substituted(rendered, target)
         verify_frontmatter_ok(rendered, target)
         if not dry_run:
-            target.write_text(rendered, encoding="utf-8")
+            atomic_write_text(target, rendered)
         created.append(target)
     return (created, skipped)
 

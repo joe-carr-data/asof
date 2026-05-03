@@ -19,6 +19,7 @@ from utils import (
     SKILL_VERSION,
     _read_skill_version,
     atomic_write_json,
+    atomic_write_text,
     compare_versions,
     ensure_inside,
     file_lock,
@@ -168,6 +169,52 @@ def test_atomic_write_indented_and_sorted(tmp_path: Path) -> None:
     assert content.endswith("\n")
     assert content.index('"a"') < content.index('"z"')  # sorted
     assert "\n  " in content  # indented
+
+
+# ─── atomic_write_text (round-1 phase-3 MEDIUM) ────────────────────────────
+
+
+def test_atomic_write_text_creates_file(tmp_path: Path) -> None:
+    target = tmp_path / "out.md"
+    atomic_write_text(target, "hello\nworld\n")
+    assert target.read_text(encoding="utf-8") == "hello\nworld\n"
+
+
+def test_atomic_write_text_creates_parent_dirs(tmp_path: Path) -> None:
+    target = tmp_path / "deep" / "nested" / "out.md"
+    atomic_write_text(target, "content")
+    assert target.is_file()
+
+
+def test_atomic_write_text_overwrites_existing(tmp_path: Path) -> None:
+    target = tmp_path / "out.md"
+    target.write_text("old", encoding="utf-8")
+    atomic_write_text(target, "new")
+    assert target.read_text(encoding="utf-8") == "new"
+
+
+def test_atomic_write_text_leaves_no_temp_files_on_success(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "out.md"
+    atomic_write_text(target, "x")
+    assert list(tmp_path.iterdir()) == [target]
+
+
+def test_atomic_write_text_no_trailing_newline_added(tmp_path: Path) -> None:
+    """atomic_write_text writes exactly the content given — no automatic
+    trailing newline (caller controls). Different from atomic_write_json
+    which always appends one for diff cleanliness."""
+    target = tmp_path / "out.txt"
+    atomic_write_text(target, "no-newline")
+    assert target.read_text(encoding="utf-8") == "no-newline"
+
+
+def test_atomic_write_text_unicode_roundtrip(tmp_path: Path) -> None:
+    target = tmp_path / "out.md"
+    content = "héllo — wörld 🎉\n"
+    atomic_write_text(target, content)
+    assert target.read_text(encoding="utf-8") == content
 
 
 class _Unserializable:

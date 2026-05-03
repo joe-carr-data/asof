@@ -52,6 +52,7 @@ from delta import extract_frontmatter  # type: ignore[import-not-found]
 from utils import (  # type: ignore[import-not-found]
     SKILL_VERSION,
     atomic_write_json,
+    atomic_write_text,
     compare_versions,
     ensure_inside,
     parse_version,
@@ -62,6 +63,7 @@ __all__ = [
     # utils
     "SKILL_VERSION",
     "atomic_write_json",
+    "atomic_write_text",
     "compare_versions",
     "ensure_inside",
     "parse_version",
