@@ -157,6 +157,97 @@ def test_silent_on_md_outside_project(
     assert capsys.readouterr().out == ""
 
 
+# ─── path-traversal + Pattern C guard (gpt-5.2-pro round-2 phase-2 HIGH) ──
+
+
+@pytest.mark.parametrize(
+    "evil_name",
+    [
+        "../escape",
+        "../../etc/passwd",
+        "foo/../bar",
+        "/absolute/path",
+        "with spaces",  # slug regex rejects
+        "UpperCase",  # slug regex requires lowercase
+        "..",
+        "trailing-",  # slug regex requires alnum end
+        "-leading",  # slug regex requires alnum start
+        "",
+    ],
+)
+def test_path_traversal_in_project_name_silently_no_ops(
+    hook_main,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    evil_name: str,
+) -> None:
+    """ASOF_PROJECT_NAME flows into a filesystem path. Untrusted env values
+    that don't match the slug regex must NOT escape `.pending-sync/`.
+    Hook silently no-ops rather than allowing the write.
+    """
+    project = tmp_path / "proj"
+    project.mkdir()
+    md = project / "x.md"
+    md.write_text("# x")
+    env = _env(project_root=project, project_name=evil_name, wiki_dir=tmp_path / "wiki")
+    rc = hook_main(_payload(file_path=str(md)), env)
+    assert rc == 0
+    assert capsys.readouterr().out == ""
+    # Verify no escape happened: the literal evil-named directory should NOT
+    # appear anywhere outside the wiki dir.
+    suspicious = list(tmp_path.glob("**/escape*")) + list(tmp_path.glob("**/passwd*"))
+    assert suspicious == []
+
+
+def test_pattern_c_feedback_loop_excluded(
+    hook_main, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    """In Pattern C, wiki_dir is INSIDE project_root. Editing wiki pages
+    must NOT trigger reminders (would cause infinite loop during ingest).
+    """
+    repo = tmp_path / "myrepo"
+    repo.mkdir()
+    wiki = repo / ".asof"
+    wiki.mkdir()
+    # Wiki page being edited (inside project root AND inside wiki dir)
+    wiki_page = wiki / "wiki" / "myrepo" / "current_state.md"
+    wiki_page.parent.mkdir(parents=True)
+    wiki_page.write_text("# state")
+
+    rc = hook_main(
+        _payload(file_path=str(wiki_page)),
+        _env(project_root=repo, wiki_dir=wiki),
+    )
+    assert rc == 0
+    # Must NOT emit — wiki edits don't trigger reminders
+    assert capsys.readouterr().out == ""
+
+
+def test_pattern_c_source_edits_still_fire(
+    hook_main, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    """The Pattern C exclusion must NOT prevent reminders for legitimate
+    source-doc edits inside the repo (only wiki internals are excluded).
+    """
+    repo = tmp_path / "myrepo"
+    repo.mkdir()
+    wiki = repo / ".asof"
+    wiki.mkdir()
+    # Source doc inside the repo but OUTSIDE the wiki dir
+    source_md = repo / "docs" / "design.md"
+    source_md.parent.mkdir()
+    source_md.write_text("# design")
+
+    rc = hook_main(
+        _payload(file_path=str(source_md)),
+        _env(project_root=repo, wiki_dir=wiki),
+    )
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert out  # Must emit
+    assert "[asof:wiki-reminder]" in out
+
+
 def test_silent_on_malformed_input(
     hook_main, capsys: pytest.CaptureFixture[str], tmp_path: Path
 ) -> None:

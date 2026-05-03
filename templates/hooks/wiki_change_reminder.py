@@ -27,6 +27,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -40,6 +41,13 @@ TRIGGERING_TOOLS: frozenset[str] = frozenset(
 #: Suppression window: don't emit two reminders for the same project within
 #: this many seconds. Codex round-2 fix (per-project, not global).
 DEBOUNCE_SECONDS: float = 30.0
+
+#: Slug regex matching the format produced by `slugify()` in the sync skill.
+#: Used to validate `ASOF_PROJECT_NAME` env (which lands in a filesystem
+#: path) against path-traversal attacks. gpt-5.2-pro round-2 phase-2 HIGH.
+_PROJECT_SLUG_RE: re.Pattern[str] = re.compile(
+    r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$"
+)
 
 
 def main(
@@ -91,12 +99,19 @@ def _main_inner(
         # Defensive default: any missing env → no-op cleanly. Don't fail.
         return 0
 
+    # Validate project_name against slug regex BEFORE using it as a path
+    # component (gpt-5.2-pro round-2 phase-2 HIGH: untrusted env value
+    # could escape .pending-sync/ via "../../foo"). The hook never trusts
+    # env to construct paths without explicit containment.
+    if not _PROJECT_SLUG_RE.match(project_name):
+        return 0
+
     try:
         payload = json.loads(stdin_text)
     except json.JSONDecodeError:
         return 0  # Malformed input — don't crash the tool.
 
-    if not _should_fire(payload, project_root):
+    if not _should_fire(payload, project_root, wiki_dir):
         return 0
 
     # Atomic debounce claim (Codex round-1 phase-2 HIGH fix). Replaces the
@@ -124,8 +139,18 @@ def _main_inner(
 # ─── helpers ────────────────────────────────────────────────────────────────
 
 
-def _should_fire(payload: dict[str, Any], project_root: str) -> bool:
-    """True if this payload represents an .md edit inside project_root."""
+def _should_fire(
+    payload: dict[str, Any], project_root: str, wiki_dir: str
+) -> bool:
+    """True if this payload represents an .md edit inside project_root that
+    is NOT also inside the wiki dir.
+
+    Excluding edits under wiki_dir prevents a Pattern-C feedback loop: the
+    wiki lives at <repo>/.asof/, so editing wiki pages would otherwise
+    trigger sync reminders during the agent's own ingest work
+    (gpt-5.2-pro round-2 phase-2 HIGH). For Pattern A/B wikis, this check
+    is a no-op since wiki_dir is outside project_root.
+    """
     tool = payload.get("tool_name", "")
     if tool not in TRIGGERING_TOOLS:
         return False
@@ -135,14 +160,20 @@ def _should_fire(payload: dict[str, Any], project_root: str) -> bool:
     try:
         abs_path = Path(file_path).resolve()
         root = Path(project_root).resolve()
+        wiki = Path(wiki_dir).resolve()
     except (OSError, ValueError):
         return False
+    # Must be inside the project root...
     try:
         abs_path.relative_to(root)
     except ValueError:
         return False
-    # Exclude edits inside the wiki itself (avoids feedback loop when the
-    # agent is updating wiki pages from inside the project).
+    # ...but NOT inside the wiki dir (Pattern C feedback-loop guard).
+    try:
+        abs_path.relative_to(wiki)
+        return False  # File is inside the wiki — skip
+    except ValueError:
+        pass  # Not inside wiki — good
     return True
 
 
@@ -177,10 +208,23 @@ def _claim_debounce_slot(
     reminder, never silent suppression of a real change.
 
     Test seam: `now` overrides `time.time()` for deterministic tests.
+
+    NOTE: `project_name` is assumed to have already been slug-validated
+    by `_main_inner`. We additionally verify the resolved stamp path lives
+    directly under stamp_dir as a belt-and-suspenders containment check
+    (gpt-5.2-pro round-2 phase-2 HIGH).
     """
-    stamp_dir = Path(wiki_dir) / ".pending-sync"
+    base = Path(wiki_dir).resolve()
+    stamp_dir = (base / ".pending-sync").resolve()
     stamp_dir.mkdir(parents=True, exist_ok=True)
-    stamp = stamp_dir / f"{project_name}.stamp"
+
+    stamp = (stamp_dir / f"{project_name}.stamp").resolve()
+    # Containment: even though _PROJECT_SLUG_RE rejects path-separator
+    # input, double-check the resolved stamp is a direct child of
+    # stamp_dir (defense in depth).
+    if stamp.parent != stamp_dir:
+        return False
+
     current = now if now is not None else time.time()
 
     try:
