@@ -1,0 +1,73 @@
+# asof — pyproject.toml
+#
+# Runtime: stdlib only. Users do NOT need to run pip / uv / npm to use asof.
+# Dev-only: pytest for tests, ruff for linting. Install with:
+#   pip install -e '.[dev]'
+#
+# This file exists so tests / CI can resolve imports from each skill's
+# scripts/ directory without sys.path hacks. End users never look at it.
+
+[project]
+name = "asof"
+version = "0.1.0-dev"
+description = "Time-aware wiki for Claude Code. Older claims age, newer ones supersede."
+requires-python = ">=3.9"
+license = { text = "MIT" }
+readme = "README.md"
+authors = [{ name = "Joe Carr" }]
+keywords = ["wiki", "documentation", "knowledge-base", "time-aware", "claude-code"]
+classifiers = [
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Operating System :: MacOS",
+  "Operating System :: POSIX :: Linux",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=7.0",
+  "pytest-cov>=4.0",
+  "ruff>=0.4.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/joe-carr-data/asof"
+Repository = "https://github.com/joe-carr-data/asof"
+Changelog = "https://github.com/joe-carr-data/asof/blob/main/CHANGELOG.md"
+
+# ─── pytest ─────────────────────────────────────────────────────────────────
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Each skill's scripts/ is a self-contained package (no shared lib for v1 — see
+# PLAN.md section 3 notes). pythonpath here lets tests import skill modules
+# directly without sys.path hacks.
+pythonpath = ["skills/sync/scripts"]
+addopts = "-ra --strict-markers --strict-config"
+xfail_strict = true
+
+# ─── ruff ───────────────────────────────────────────────────────────────────
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = [
+  "E",    # pycodestyle errors
+  "W",    # pycodestyle warnings
+  "F",    # pyflakes
+  "I",    # isort
+  "B",    # flake8-bugbear
+  "UP",   # pyupgrade
+  "SIM",  # flake8-simplify
+  "PTH",  # use pathlib
+]
+ignore = [
+  "E501",  # line-length handled by formatter
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011"]  # assert False is fine in tests
