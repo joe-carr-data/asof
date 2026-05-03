@@ -45,7 +45,7 @@ testpaths = ["tests"]
 # Each skill's scripts/ is a self-contained package (no shared lib for v1 — see
 # PLAN.md section 3 notes). pythonpath here lets tests import skill modules
 # directly without sys.path hacks.
-pythonpath = ["skills/sync/scripts", "skills/init/scripts"]
+pythonpath = ["skills/sync/scripts", "skills/init/scripts", "skills/lint/scripts"]
 addopts = "-ra --strict-markers --strict-config"
 xfail_strict = true
 
