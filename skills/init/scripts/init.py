@@ -298,6 +298,10 @@ def _print_scaffold_summary(result: ScaffoldResult) -> None:
         print(f"  ⟳ updated  {p}")
     for p in result.files_skipped:
         print(f"  · skipped  {p} (already exists)")
+    if result.gitignore_augmented:
+        print("  ✓ .gitignore augmented (Pattern C: ignore .asof/raw/, .last-sync/, etc.)")
+    elif result.gitignore_already_done:
+        print("  · .gitignore already has asof block (skipped)")
 
 
 def _print_integration_summary(result: IntegrationResult) -> None:

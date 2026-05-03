@@ -529,3 +529,107 @@ def test_do_scaffold_idempotent_re_run_skips_existing_pages(
     # Re-running with the same slug must raise via the duplicate check
     with pytest.raises(ScaffoldError, match="already exists"):
         do_scaffold(request, today="2026-05-04", dry_run=False)
+
+
+# ─── .gitignore augmentation (Pattern C) — Codex round-1 phase-3 HIGH ─────
+
+
+def test_pattern_a_no_gitignore_augmentation(tmp_path: Path) -> None:
+    """Pattern A wiki is outside the source repo. Don't touch source's
+    .gitignore."""
+    from scaffold import augment_pattern_c_gitignore
+
+    layout = _make_layout_a(tmp_path)
+    augmented, skipped = augment_pattern_c_gitignore(layout, dry_run=False)
+    assert augmented is False
+    assert skipped is False
+    # No .gitignore was touched anywhere
+    assert not (layout.source / ".gitignore").exists()
+
+
+def test_pattern_c_creates_gitignore_when_missing(tmp_path: Path) -> None:
+    from scaffold import (
+        GITIGNORE_CLOSE_MARKER,
+        GITIGNORE_OPEN_MARKER,
+        PATTERN_C_GITIGNORE_ENTRIES,
+        augment_pattern_c_gitignore,
+    )
+
+    layout = _make_layout_c(tmp_path)
+    augmented, skipped = augment_pattern_c_gitignore(layout, dry_run=False)
+    assert augmented is True
+    assert skipped is False
+    # source = wiki_dir.parent for Pattern C; .gitignore lives there
+    gitignore = layout.wiki_dir.parent / ".gitignore"
+    assert gitignore.is_file()
+    text = gitignore.read_text()
+    assert GITIGNORE_OPEN_MARKER in text
+    assert GITIGNORE_CLOSE_MARKER in text
+    for entry in PATTERN_C_GITIGNORE_ENTRIES:
+        assert entry in text
+
+
+def test_pattern_c_appends_to_existing_gitignore(tmp_path: Path) -> None:
+    from scaffold import (
+        GITIGNORE_OPEN_MARKER,
+        augment_pattern_c_gitignore,
+    )
+
+    layout = _make_layout_c(tmp_path)
+    gitignore = layout.wiki_dir.parent / ".gitignore"
+    gitignore.write_text("node_modules/\n*.log\n")
+    augmented, skipped = augment_pattern_c_gitignore(layout, dry_run=False)
+    assert augmented is True
+    assert skipped is False
+    text = gitignore.read_text()
+    # Existing content preserved
+    assert "node_modules/" in text
+    assert "*.log" in text
+    # asof block appended after a blank-line separator
+    assert GITIGNORE_OPEN_MARKER in text
+    assert text.index("node_modules/") < text.index(GITIGNORE_OPEN_MARKER)
+
+
+def test_pattern_c_gitignore_idempotent(tmp_path: Path) -> None:
+    """Re-running augment_pattern_c_gitignore detects the marker and skips."""
+    from scaffold import (
+        GITIGNORE_OPEN_MARKER,
+        augment_pattern_c_gitignore,
+    )
+
+    layout = _make_layout_c(tmp_path)
+    augment_pattern_c_gitignore(layout, dry_run=False)
+    # Second call: detects marker, skips
+    augmented2, skipped2 = augment_pattern_c_gitignore(layout, dry_run=False)
+    assert augmented2 is False
+    assert skipped2 is True
+    # Block appears only once
+    text = (layout.wiki_dir.parent / ".gitignore").read_text()
+    assert text.count(GITIGNORE_OPEN_MARKER) == 1
+
+
+def test_pattern_c_gitignore_dry_run_no_write(tmp_path: Path) -> None:
+    from scaffold import augment_pattern_c_gitignore
+
+    layout = _make_layout_c(tmp_path)
+    augmented, _ = augment_pattern_c_gitignore(layout, dry_run=True)
+    assert augmented is True
+    assert not (layout.wiki_dir.parent / ".gitignore").exists()
+
+
+def test_do_scaffold_pattern_c_augments_gitignore(tmp_path: Path) -> None:
+    """End-to-end via the orchestrator: Pattern C init augments .gitignore."""
+    layout = _make_layout_c(tmp_path)
+    request = ScaffoldRequest(layout, "MyRepo", "myrepo")
+    result = do_scaffold(request, today="2026-05-04", dry_run=False)
+    assert result.gitignore_augmented is True
+    assert result.gitignore_already_done is False
+    assert (layout.wiki_dir.parent / ".gitignore").is_file()
+
+
+def test_do_scaffold_pattern_a_no_gitignore_change(tmp_path: Path) -> None:
+    layout = _make_layout_a(tmp_path)
+    request = ScaffoldRequest(layout, "Demo", "demo")
+    result = do_scaffold(request, today="2026-05-04", dry_run=False)
+    assert result.gitignore_augmented is False
+    assert result.gitignore_already_done is False

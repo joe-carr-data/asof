@@ -90,6 +90,24 @@ PROJECT_SUBDIRS: tuple[str, ...] = ("entities", "concepts", "sources")
 #: catch substitution bugs before they reach the user as cryptic lint failures.
 _PLACEHOLDER_RE: re.Pattern[str] = re.compile(r"\{\{[A-Z_][A-Z0-9_]*\}\}")
 
+#: Marker comments wrapping the asof block in a Pattern C source repo's
+#: .gitignore. Used to detect existing installations on re-run.
+GITIGNORE_OPEN_MARKER = "# asof-wiki:gitignore"
+GITIGNORE_CLOSE_MARKER = "# /asof-wiki:gitignore"
+
+#: Entries written into <source>/.gitignore for Pattern C wikis. These are
+#: the runtime artifacts asof creates inside .asof/ that should NOT be
+#: committed: the rsync mirror, per-project last-sync reports, debounce
+#: stamps, the lock file, and pre-migration backups (per PLAN.md section 4
+#: + SCHEMA.md §12).
+PATTERN_C_GITIGNORE_ENTRIES: tuple[str, ...] = (
+    ".asof/raw/",
+    ".asof/.last-sync/",
+    ".asof/.pending-sync/",
+    ".asof/.asof.lock",
+    ".asof/wiki.bak.*/",
+)
+
 
 # ─── data model ────────────────────────────────────────────────────────────
 
@@ -160,6 +178,8 @@ class ScaffoldResult:
     files_created: tuple[Path, ...]
     files_updated: tuple[Path, ...]
     files_skipped: tuple[Path, ...]  # already existed (no overwrite)
+    gitignore_augmented: bool  # Pattern C: True if .gitignore got asof entries
+    gitignore_already_done: bool  # Pattern C: True if asof block already there
     dry_run: bool
 
 
@@ -395,6 +415,59 @@ def _new_project_block(layout: WikiLayout, project_slug: str) -> dict:
     return block
 
 
+# ─── stage 3 (Pattern C): .gitignore augmentation ─────────────────────────
+
+
+def augment_pattern_c_gitignore(
+    layout: WikiLayout, *, dry_run: bool = False
+) -> tuple[bool, bool]:
+    """Append the asof entries to <source>/.gitignore for Pattern C.
+
+    Pattern A/B: no-op (wiki dir is outside the source repo, no risk of
+    committing wiki internals). Returns (False, False) for those.
+
+    Pattern C: read <source>/.gitignore (or treat as empty if missing),
+    detect the marker block, append idempotently if absent. Returns
+    (augmented, skipped_already_present).
+
+    Marker-fenced (`# asof-wiki:gitignore` ... `# /asof-wiki:gitignore`)
+    so re-runs detect existing installs and skip without duplicating.
+    Existing .gitignore content is preserved verbatim.
+
+    Codex round-1 phase-3 HIGH: PLAN.md §4 promised this for Pattern C
+    but bootstrap_wiki_dir didn't implement it; PR-time committers were
+    one slip away from staging the entire raw/ mirror.
+    """
+    if layout.pattern != "C":
+        return (False, False)
+
+    # Pattern C: source repo root is wiki_dir.parent (the .asof/ lives there).
+    gitignore_path = layout.wiki_dir.parent / ".gitignore"
+
+    existing = ""
+    if gitignore_path.is_file():
+        existing = gitignore_path.read_text(encoding="utf-8")
+        # Idempotent: detect existing asof block by either marker
+        if (
+            GITIGNORE_OPEN_MARKER in existing
+            or GITIGNORE_CLOSE_MARKER in existing
+        ):
+            return (False, True)
+
+    block_lines = [GITIGNORE_OPEN_MARKER, *PATTERN_C_GITIGNORE_ENTRIES, GITIGNORE_CLOSE_MARKER]
+    block = "\n".join(block_lines) + "\n"
+
+    # Normalize trailing newlines if existing content; blank-line separator
+    # before the block for visual cleanliness.
+    new_content = (
+        existing.rstrip("\n") + "\n\n" + block if existing else block
+    )
+
+    if not dry_run:
+        gitignore_path.write_text(new_content, encoding="utf-8")
+    return (True, False)
+
+
 # ─── stage 4: project pages ────────────────────────────────────────────────
 
 
@@ -457,6 +530,12 @@ def do_scaffold(
         # important file, conceptually).
         updated_3.append(config_path)
 
+    # Pattern-C-only: augment <source>/.gitignore so wiki internals don't
+    # accidentally get committed (PLAN.md §4, Codex round-1 phase-3 HIGH).
+    gitignore_augmented, gitignore_already = augment_pattern_c_gitignore(
+        request.layout, dry_run=dry_run
+    )
+
     created_4, skipped_4 = scaffold_project_pages(
         request, today=today, dry_run=dry_run
     )
@@ -466,6 +545,8 @@ def do_scaffold(
         files_created=tuple(created_3 + created_4),
         files_updated=tuple(updated_3),
         files_skipped=tuple(skipped_3 + skipped_4),
+        gitignore_augmented=gitignore_augmented,
+        gitignore_already_done=gitignore_already,
         dry_run=dry_run,
     )
 
