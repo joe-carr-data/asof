@@ -1,0 +1,20 @@
+{
+  "name": "asof",
+  "description": "Time-aware wiki for Claude Code. Older claims age, newer ones supersede, the wiki tells you what's true as of now. Three skills (init, sync, lint) plus an opt-in PostToolUse change-reminder hook.",
+  "version": "0.1.0-dev",
+  "author": {
+    "name": "Joe Carr",
+    "url": "https://github.com/joe-carr-data"
+  },
+  "homepage": "https://github.com/joe-carr-data/asof",
+  "repository": "https://github.com/joe-carr-data/asof",
+  "license": "MIT",
+  "keywords": [
+    "wiki",
+    "documentation",
+    "knowledge-base",
+    "time-aware",
+    "supersession",
+    "karpathy-wiki"
+  ]
+}

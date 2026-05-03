@@ -40,14 +40,15 @@ A Claude Code plugin that gives the agent a sense of time across documentation. 
 ## 3. Repository layout
 
 ```
-asof/                                   # github.com/jcarr/asof (or org)
+asof/                                   # github.com/<user>/asof
 ├── README.md                           # 30-second pitch + install + 5-min tutorial
 ├── LICENSE                             # MIT
-├── CHANGELOG.md                        # versioned releases
+├── CHANGELOG.md                        # versioned releases + schema-version semantics
 ├── PLAN.md                             # this file (during build)
 ├── .gitignore
-├── plugin.json                         # plugin manifest
-├── skills/
+├── .claude-plugin/
+│   └── plugin.json                     # plugin manifest (per Claude Code plugin spec)
+├── skills/                             # skills discovered implicitly by directory layout
 │   ├── init/
 │   │   ├── SKILL.md                    # bootstrap a wiki for a project
 │   │   └── scripts/init.py
@@ -69,19 +70,27 @@ asof/                                   # github.com/jcarr/asof (or org)
 │   ├── wiki_current_state.md           # initial current_state.md (placeholder)
 │   ├── project_CLAUDE_snippet.md       # wiki-precedence section to append
 │   └── hooks/
-│       └── wiki_change_reminder.py     # generic PostToolUse hook
+│       └── wiki_change_reminder.py     # template — installed into user project's .claude/, NOT a plugin-level hook
 ├── examples/
 │   ├── codebase-wiki/                  # 3-5 .md sources + resulting wiki
 │   ├── research-wiki/                  # research topic example
 │   └── book-wiki/                      # fan-wiki style
 ├── scripts/
-│   └── install.sh                      # convenience installer for non-plugin route
+│   ├── ci/
+│   │   └── check_schema_bump.py        # CI gate (PLAN section 17)
+│   └── install.sh                      # convenience installer for non-marketplace route
 └── tests/
     ├── test_sync.py
     ├── test_lint.py
     ├── test_init.py
     └── fixtures/
 ```
+
+**Notes on layout (verified against Claude Code plugins doc):**
+- `plugin.json` lives at `.claude-plugin/plugin.json`, **not** the repo root.
+- Skills are **discovered implicitly** by the `skills/<name>/SKILL.md` layout — no `skills:` array in `plugin.json`.
+- `templates/hooks/wiki_change_reminder.py` is a **template** that `asof:init` writes into a user's project `.claude/` settings; it is **not** a plugin-level hook (asof has no `hooks/hooks.json`).
+- Plugin namespace: `asof` → skills are `/asof:init`, `/asof:sync`, `/asof:lint`.
 
 ## 4. Wiki dir patterns
 
