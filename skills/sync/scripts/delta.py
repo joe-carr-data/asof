@@ -135,11 +135,18 @@ def parse_sources(frontmatter: str) -> list[tuple[str, str]]:
     # any leading whitespace so 2-space and 4-space indentation both work.
     entries = re.split(r"\n(?=[ \t]+-\s)", block)
     out: list[tuple[str, str]] = []
+    # `path:` may be unquoted (foo.md), single-quoted ('path with space.md'),
+    # or double-quoted ("path with space.md"). Mtime is always a bare ISO
+    # date so a simple \S+ match suffices.
+    path_pattern = re.compile(
+        r"""-\s*path:\s*(?:"(?P<dq>[^"\n]+)"|'(?P<sq>[^'\n]+)'|(?P<bare>\S+))"""
+    )
     for entry in entries:
-        path_m = re.search(r"-\s*path:\s*(\S+)", entry)
+        path_m = path_pattern.search(entry)
         mtime_m = re.search(r"source_mtime:\s*(\S+)", entry)
         if path_m and mtime_m:
-            out.append((path_m.group(1), mtime_m.group(1).strip()))
+            path = path_m.group("dq") or path_m.group("sq") or path_m.group("bare")
+            out.append((path, mtime_m.group(1).strip()))
     return out
 
 

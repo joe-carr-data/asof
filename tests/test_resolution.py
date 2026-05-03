@@ -216,6 +216,15 @@ def test_resolve_projects_no_projects_configured(tmp_path: Path) -> None:
         resolve_projects(cfg, cwd=tmp_path)
 
 
+def test_resolve_projects_all_on_empty_wiki_raises(tmp_path: Path) -> None:
+    """Codex round-1 phase-1 L1: --all on a wiki with zero projects must
+    raise (previously returned empty list silently → 0-project sync that
+    looked successful)."""
+    cfg = _build_wiki_with_n_projects(tmp_path, n=0)
+    with pytest.raises(ProjectSelectionError, match="no projects are configured"):
+        resolve_projects(cfg, all_projects=True)
+
+
 def test_resolve_projects_multi_match_interactive_returns_all(tmp_path: Path) -> None:
     """Nested sources: interactive mode returns all matches for the caller to prompt."""
     cfg = _build_wiki_with_n_projects(tmp_path, n=2, nested=True)

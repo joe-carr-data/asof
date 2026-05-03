@@ -110,6 +110,32 @@ def test_parse_sources_handles_4space_indent() -> None:
     assert parse_sources(fm) == [("raw/x/foo.md", "2026-04-26")]
 
 
+def test_parse_sources_handles_double_quoted_paths_with_spaces() -> None:
+    """Codex round-1 phase-1 L2: paths with spaces, quoted, must parse."""
+    fm = """sources:
+  - path: "raw/x/foo bar.md"
+    source_mtime: 2026-04-26
+"""
+    assert parse_sources(fm) == [("raw/x/foo bar.md", "2026-04-26")]
+
+
+def test_parse_sources_handles_single_quoted_paths_with_spaces() -> None:
+    fm = """sources:
+  - path: 'raw/x/foo bar.md'
+    source_mtime: 2026-04-26
+"""
+    assert parse_sources(fm) == [("raw/x/foo bar.md", "2026-04-26")]
+
+
+def test_parse_sources_unquoted_paths_unchanged_behavior() -> None:
+    """Bare paths still work — backwards-compat with existing wikis."""
+    fm = """sources:
+  - path: raw/x/foo.md
+    source_mtime: 2026-04-26
+"""
+    assert parse_sources(fm) == [("raw/x/foo.md", "2026-04-26")]
+
+
 # ─── build_source_index ─────────────────────────────────────────────────────
 
 

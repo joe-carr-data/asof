@@ -126,11 +126,12 @@ def write_last_sync(
 
 
 def render_human_report(
-    delta: DeltaReport,
+    delta: DeltaReport | None,
     rsync: RsyncResult | None,
     *,
     summary_only: bool = False,
     list_limit: int = DEFAULT_LIST_LIMIT,
+    project_name: str | None = None,
 ) -> str:
     """Render a per-project text report for the agent / user.
 
@@ -139,15 +140,31 @@ def render_human_report(
     plain ASCII + minor box-drawing if you squint.
 
     Args:
-        delta: the DeltaReport.
-        rsync: the RsyncResult, or None for dry-run / no-rsync paths.
+        delta: the DeltaReport. May be None when sync ran in --dry-run
+            mode — in which case delta detection was deliberately skipped
+            (the rsync stats above are the accurate signal). The report
+            then prints a clear note telling the user to re-run without
+            --dry-run for the NEW/MODIFIED/DELETED breakdown.
+        rsync: the RsyncResult, or None if rsync didn't run.
         summary_only: if True, suppress per-file listings (just print counts).
-        list_limit: cap per-category lines; remainder collapsed to "... and N more".
+        list_limit: cap per-category lines; remainder collapsed to
+            "... and N more".
+        project_name: required when `delta is None` (dry-run path); pulled
+            from `delta.project_name` otherwise.
     """
     lines: list[str] = []
-    lines.append(f"=== project: {delta.project_name} ===")
-    lines.append(f"raw:    {delta.raw_subdir}")
-    lines.append(f"wiki:   {delta.wiki_subdir}")
+    if delta is not None:
+        name = delta.project_name
+        raw_sub = delta.raw_subdir
+        wiki_sub = delta.wiki_subdir
+    else:
+        if project_name is None:
+            raise ValueError("project_name is required when delta is None")
+        name = project_name
+        raw_sub = wiki_sub = "(deltas skipped in dry-run)"
+    lines.append(f"=== project: {name} ===")
+    lines.append(f"raw:    {raw_sub}")
+    lines.append(f"wiki:   {wiki_sub}")
     if rsync is not None:
         suffix = " (dry-run)" if rsync.dry_run else ""
         lines.append(f"rsync:  exit={rsync.return_code}{suffix}")
@@ -158,6 +175,15 @@ def render_human_report(
     else:
         lines.append("rsync:  (skipped)")
     lines.append("")
+
+    if delta is None:
+        lines.append(
+            "[dry-run] delta detection skipped — rsync stats above show what "
+            "would change. Re-run without --dry-run to see the "
+            "NEW / MODIFIED / DELETED breakdown."
+        )
+        lines.append("")
+        return "\n".join(lines)
 
     lines.extend(
         _render_section(
@@ -240,25 +266,40 @@ def _render_section(
 
 
 def render_run_summary(
-    reports: list[tuple[DeltaReport, RsyncResult | None]],
+    reports: list[tuple[DeltaReport | None, RsyncResult | None]],
 ) -> str:
-    """Render the trailing summary across all projects synced this run."""
-    total_new = sum(len(d.new) for d, _ in reports)
-    total_modified = sum(len(d.modified) for d, _ in reports)
-    total_deleted = sum(len(d.deleted) for d, _ in reports)
+    """Render the trailing summary across all projects synced this run.
+
+    `delta=None` entries (dry-run path) are counted in the projects-synced
+    tally but skipped in the delta totals (their deltas weren't computed).
+    The summary explicitly notes when deltas were omitted.
+    """
+    delta_reports = [d for d, _ in reports if d is not None]
+    total_new = sum(len(d.new) for d in delta_reports)
+    total_modified = sum(len(d.modified) for d in delta_reports)
+    total_deleted = sum(len(d.deleted) for d in delta_reports)
     total_changes = total_new + total_modified + total_deleted
     transferred = sum(r.transferred for _, r in reports if r is not None)
     deleted_files = sum(r.deleted for _, r in reports if r is not None)
+    dry_run_count = len(reports) - len(delta_reports)
 
     lines = ["=== summary ==="]
     lines.append(f"projects synced: {len(reports)}")
     lines.append(
         f"rsync:           {transferred} transferred, {deleted_files} deleted"
     )
-    lines.append(
-        f"deltas:          NEW={total_new} MODIFIED={total_modified} "
-        f"DELETED={total_deleted} (total={total_changes})"
-    )
-    if total_changes == 0:
+    if dry_run_count == len(reports) and reports:
+        lines.append("deltas:          (skipped in dry-run mode)")
+    else:
+        suffix = (
+            f" ({dry_run_count} project(s) skipped delta detection in dry-run)"
+            if dry_run_count
+            else ""
+        )
+        lines.append(
+            f"deltas:          NEW={total_new} MODIFIED={total_modified} "
+            f"DELETED={total_deleted} (total={total_changes}){suffix}"
+        )
+    if total_changes == 0 and dry_run_count == 0 and reports:
         lines.append("wiki is up to date.")
     return "\n".join(lines)

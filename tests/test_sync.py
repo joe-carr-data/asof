@@ -239,10 +239,86 @@ def test_sync_dry_run_skips_last_sync_write(
 
     rc = main(["--wiki-dir", str(wiki), "--all", "--dry-run"])
     assert rc == ExitCode.SUCCESS
+    out = capsys.readouterr().out
     # No files actually copied; no last-sync file
     assert not (wiki / "raw" / "proj-0" / "a.md").exists()
     assert not (wiki / ".last-sync").exists()
-    assert "(dry-run)" in capsys.readouterr().out
+    assert "(dry-run)" in out
+
+
+@needs_rsync
+def test_sync_dry_run_skips_delta_detection_with_clear_note(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Codex round-1 phase-1 M3: dry-run was misleading because deltas were
+    computed against (unchanged) raw/ even though source had changed.
+
+    Fix: skip delta detection in dry-run; print explicit note.
+    """
+    wiki, sources = _make_wiki(tmp_path, n_projects=1)
+    (sources[0] / "a.md").write_text("# a\n")
+    rc = main(["--wiki-dir", str(wiki), "--all", "--dry-run"])
+    assert rc == ExitCode.SUCCESS
+    out = capsys.readouterr().out
+    # The clear note must appear
+    assert "[dry-run] delta detection skipped" in out
+    # No NEW/MODIFIED/DELETED counts (since we didn't compute them)
+    assert "NEW (" not in out
+    assert "MODIFIED (" not in out
+    assert "DELETED (" not in out
+    # Run summary explicitly notes deltas skipped
+    assert "deltas:          (skipped in dry-run mode)" in out
+
+
+def test_sync_invalid_version_in_config_returns_config_error(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Codex round-1 phase-1 M2: a malformed schema_version must NOT crash
+    with a stack trace; it must surface as a clean ConfigError + exit 2."""
+    wiki, _ = _make_wiki(tmp_path, n_projects=1, schema="not-a-version")
+    rc = main(["--wiki-dir", str(wiki), "--all"])
+    assert rc == ExitCode.CONFIG_ERROR
+    err = capsys.readouterr().err
+    assert "not a valid version string" in err
+
+
+@needs_rsync
+def test_sync_interactive_all_at_prompt_picks_all_projects(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Codex round-1 phase-1 M1: previous _prompt_project_choice returned
+    projects[0] when user picked "a" (all) — silent data loss because
+    other projects never synced. Fix: returns "ALL" sentinel and main()
+    re-resolves with all_projects=True.
+    """
+    wiki, sources = _make_wiki(tmp_path, n_projects=2)
+    (sources[0] / "x.md").write_text("# x\n")
+    (sources[1] / "y.md").write_text("# y\n")
+    # Make cwd match BOTH projects via nesting trick: put cwd into a path
+    # that is inside src-0 AND src-0/sub-1 (where sub-1 is a sibling
+    # symlink to src-1). Simpler: just put both sources under a common
+    # parent and chdir there — but resolve_projects uses _is_inside which
+    # checks descendency. Let me create the nesting properly.
+    nested = sources[0] / "nested"
+    nested.mkdir()
+    # Force a multi-match: rewrite config so source[1] is a child of source[0]
+    cfg_path = wiki / ".asof.json"
+    cfg = json.loads(cfg_path.read_text())
+    cfg["projects"][1]["source"] = str(nested)
+    cfg_path.write_text(json.dumps(cfg))
+    monkeypatch.chdir(nested)
+    # Mock input() to pick "a"
+    monkeypatch.setattr("builtins.input", lambda _prompt="": "a")
+
+    rc = main(["--wiki-dir", str(wiki)])  # interactive, no flags
+
+    assert rc == ExitCode.SUCCESS
+    out = capsys.readouterr().out
+    # BOTH projects must have been synced — not just projects[0].
+    assert "=== project: proj-0 ===" in out
+    assert "=== project: proj-1 ===" in out
 
 
 @needs_rsync

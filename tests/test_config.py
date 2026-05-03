@@ -291,6 +291,27 @@ def test_load_raises_on_negative_lint_threshold(tmp_path: Path) -> None:
         load_wiki_config(wiki_dir)
 
 
+@pytest.mark.parametrize(
+    "version_field",
+    ["schema_version", "min_reader_version", "min_writer_version"],
+)
+@pytest.mark.parametrize("bad_value", ["abc", "1.x.0", "1..0", ""])
+def test_load_raises_on_malformed_version_string(
+    tmp_path: Path, version_field: str, bad_value: str
+) -> None:
+    """Codex round-1 phase-1 M2: invalid version strings must surface as
+    ConfigError at load time, not as an uncaught ValueError later in
+    check_version_compat."""
+    source = tmp_path / "source"
+    source.mkdir()
+    wiki_dir = tmp_path / "wiki"
+    data = _valid_pattern_a_config(source)
+    data[version_field] = bad_value
+    _write_config(wiki_dir, data)
+    with pytest.raises(ConfigError):
+        load_wiki_config(wiki_dir)
+
+
 # ─── ProjectConfig + WikiConfig methods ─────────────────────────────────────
 
 

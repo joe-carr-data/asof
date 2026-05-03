@@ -25,7 +25,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from utils import ensure_inside, slugify
+from utils import ensure_inside, parse_version, slugify
 
 # ─── constants ──────────────────────────────────────────────────────────────
 
@@ -150,9 +150,9 @@ def _build_wiki_config(
     is_pattern_c: bool,
     config_path: Path,
 ) -> WikiConfig:
-    schema_version = _str_field(raw, "schema_version", config_path)
-    min_reader = _str_field(raw, "min_reader_version", config_path)
-    min_writer = _str_field(raw, "min_writer_version", config_path)
+    schema_version = _version_field(raw, "schema_version", config_path)
+    min_reader = _version_field(raw, "min_reader_version", config_path)
+    min_writer = _version_field(raw, "min_writer_version", config_path)
     lint_thresholds = _validate_lint_thresholds(
         raw.get("lint_thresholds", {}), config_path
     )
@@ -276,6 +276,24 @@ def _str_field(
         raise ConfigError(
             f"{path!s}: `{prefix}{key}` is required and must be a non-empty string"
         )
+    return val
+
+
+def _version_field(raw: dict[str, Any], key: str, path: Path) -> str:
+    """Like `_str_field`, but additionally validates parseability as a version.
+
+    Catches malformed `schema_version` / `min_reader_version` /
+    `min_writer_version` values at load time so `check_version_compat`
+    never sees an unparseable string (Codex phase-1 round 1: previously
+    propagated as an uncaught ValueError → stack trace).
+    """
+    val = _str_field(raw, key, path)
+    try:
+        parse_version(val)
+    except ValueError as exc:
+        raise ConfigError(
+            f"{path!s}: `{key}` = {val!r} is not a valid version string: {exc}"
+        ) from exc
     return val
 
 

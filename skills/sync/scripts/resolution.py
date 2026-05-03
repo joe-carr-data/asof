@@ -125,6 +125,11 @@ def resolve_projects(
         - cwd inside no projects                   → fail-fast
     """
     if all_projects:
+        if not config.projects:
+            raise ProjectSelectionError(
+                f"--all requested but no projects are configured in "
+                f"{config.wiki_dir!s}. Run `/asof:init` to add a project."
+            )
         return list(config.projects)
 
     if name:

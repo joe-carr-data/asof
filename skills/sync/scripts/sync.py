@@ -175,7 +175,11 @@ def main(argv: list[str] | None = None) -> int:
         chosen = _prompt_project_choice(projects)
         if chosen is None:
             return ExitCode.USER_ABORT
-        projects = [chosen]
+        # User picked "all" at the prompt → re-resolve to all configured
+        # projects, not just the matched ones. Mirrors --all behavior.
+        # Codex round-1 phase-1 M1: previous code returned projects[0],
+        # silently dropping the rest.
+        projects = list(config.projects) if chosen == "ALL" else [chosen]
 
     # ── run sync per project (under the wiki lock) ─────────────────────────
     reports: list = []
@@ -198,23 +202,37 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"asof:sync: {exc}", file=sys.stderr)
                 return ExitCode.CONFIG_ERROR
 
-            try:
-                delta = detect_deltas(
-                    proj,
-                    config.wiki_dir,
-                    follow_symlinks=args.copy_links,
-                    strict_mtime=args.strict_mtime,
-                )
-            except StrictMtimeError as exc:
-                print(f"asof:sync: strict-mtime check failed — {exc}", file=sys.stderr)
-                return ExitCode.CONFIG_ERROR
-
+            # In dry-run mode we deliberately skip delta detection.
+            # Reason: rsync didn't update raw/, so detect_deltas would compare
+            # the (unchanged) raw/ against the (unchanged) wiki summaries and
+            # report 0 deltas — which is misleading if source DID change.
+            # The rsync stats above already say "would transfer N, would
+            # delete M" — that's the accurate dry-run signal.
+            # (Codex round 1 phase-1: "dry-run produces misleading delta
+            # reports because raw isn't updated".)
+            delta = None
             if not args.dry_run:
+                try:
+                    delta = detect_deltas(
+                        proj,
+                        config.wiki_dir,
+                        follow_symlinks=args.copy_links,
+                        strict_mtime=args.strict_mtime,
+                    )
+                except StrictMtimeError as exc:
+                    print(
+                        f"asof:sync: strict-mtime check failed — {exc}",
+                        file=sys.stderr,
+                    )
+                    return ExitCode.CONFIG_ERROR
                 write_last_sync(config, delta, rsync_result)
 
             print(
                 render_human_report(
-                    delta, rsync_result, summary_only=args.summary_only
+                    delta,
+                    rsync_result,
+                    summary_only=args.summary_only,
+                    project_name=proj.name,
                 )
             )
             reports.append((delta, rsync_result))
@@ -232,13 +250,20 @@ def main(argv: list[str] | None = None) -> int:
 def _prompt_project_choice(projects: list) -> object:
     """Prompt the user to pick one of multiple matched projects.
 
-    Returns the chosen ProjectConfig, or None if the user declined (Ctrl-D / empty).
-    Kept tiny + isolated so non-interactive paths can skip it cleanly.
+    Returns:
+        - A `ProjectConfig` instance: the user picked that project.
+        - The string `"ALL"`: the user wants every configured project synced
+          (the caller re-resolves with `all_projects=True`).
+        - `None`: the user declined (Ctrl-D, Ctrl-C, empty input, or `q`).
+
+    The string sentinel is deliberate: it forces the caller to make the
+    "all" semantics explicit at the call site (Codex round-1 phase-1
+    review found the previous "return projects[0]" was silent data loss).
     """
     print("Multiple projects match the current directory:")
     for i, p in enumerate(projects, 1):
         print(f"  [{i}] {p.name}  (source: {p.source})")
-    print("  [a] all")
+    print("  [a] all configured projects")
     print("  [q] quit")
     while True:
         try:
@@ -248,8 +273,7 @@ def _prompt_project_choice(projects: list) -> object:
         if choice == "q" or not choice:
             return None
         if choice == "a":
-            # Caller pivots to all-projects mode by interpreting len > 1.
-            return projects[0]  # caller should re-detect; out of scope for v1
+            return "ALL"
         if choice.isdigit():
             idx = int(choice) - 1
             if 0 <= idx < len(projects):
