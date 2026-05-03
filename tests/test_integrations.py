@@ -106,6 +106,33 @@ def test_snippet_appends_to_existing_claudemd(tmp_path: Path) -> None:
     assert text.index("Some content here.") < text.index(SNIPPET_OPEN_MARKER)
 
 
+def test_snippet_normalizes_trailing_newlines(tmp_path: Path) -> None:
+    """Round-1 phase-3 LOW: existing file ending with multiple trailing
+    newlines must produce exactly one blank line between content and
+    snippet, not 3+ newlines. Same for files ending with no newline."""
+    request = _build_request(tmp_path)
+    target = request.project_root / "CLAUDE.md"
+    # Pathological case: file already ends with "\n\n\n"
+    target.write_text("Existing line.\n\n\n", encoding="utf-8")
+    append_claudemd_snippet(request, today=TODAY, dry_run=False)
+    text = target.read_text(encoding="utf-8")
+    # Exactly one blank line ("\n\n") between the existing content and the
+    # rendered snippet's first character. Triple-newlines would be visually
+    # messy in CLAUDE.md and were the bug Codex flagged.
+    assert text.startswith("Existing line.\n\n<!--")
+    assert "\n\n\n" not in text.split("Existing line.")[1].split("<!--")[0]
+
+
+def test_snippet_handles_missing_trailing_newline(tmp_path: Path) -> None:
+    """File with no trailing newline still gets exactly one blank line."""
+    request = _build_request(tmp_path)
+    target = request.project_root / "CLAUDE.md"
+    target.write_text("No-newline-tail.", encoding="utf-8")
+    append_claudemd_snippet(request, today=TODAY, dry_run=False)
+    text = target.read_text(encoding="utf-8")
+    assert text.startswith("No-newline-tail.\n\n<!--")
+
+
 def test_snippet_skipped_when_open_marker_already_present(tmp_path: Path) -> None:
     request = _build_request(tmp_path)
     target = request.project_root / "CLAUDE.md"

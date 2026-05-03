@@ -143,13 +143,16 @@ def append_claudemd_snippet(
     if dry_run:
         return (True, False)
 
-    # Append with a leading blank-line separator if the file already has
-    # content. Create the file if it doesn't exist.
+    # Append with a single blank-line separator regardless of how the
+    # existing file ends. Round-1 phase-3 LOW: previously the code added
+    # an extra "\n" after existing content unconditionally, so a file
+    # already ending with "\n\n" produced three newlines before the
+    # snippet — visually messy in CLAUDE.md. rstrip+two-\n is canonical.
     if target.is_file():
         existing = target.read_text(encoding="utf-8")
-        if existing and not existing.endswith("\n"):
-            existing = existing + "\n"
-        new_content = existing + "\n" + rendered
+        new_content = (
+            existing.rstrip("\n") + "\n\n" + rendered if existing else rendered
+        )
     else:
         new_content = rendered
     atomic_write_text(target, new_content)

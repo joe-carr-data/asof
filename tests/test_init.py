@@ -155,9 +155,15 @@ def _stub_subprocess(monkeypatch: pytest.MonkeyPatch, returncode: int = 0) -> li
     Caveat: monkeypatch.setattr("integrations.subprocess.run", ...) actually
     patches the global subprocess.run (Python module aliasing), so this stub
     also intercepts preflight.check_rsync's rsync --version call. We
-    distinguish by the first arg: if it's `sys.executable` we treat it as
-    init's first-sync invocation and capture; otherwise we delegate to the
-    real subprocess.run so preflight still works.
+    distinguish by matching both args[0] == sys.executable AND args[1]
+    ending in `/sync.py` — the exact shape of init.py's first-sync call.
+    Anything else (preflight's rsync --version, an out-of-band python -c
+    invocation, etc.) is delegated to the real subprocess.run.
+
+    Round-1 phase-3 LOW: previous version matched only args[0] ==
+    sys.executable, which would have intercepted any stray python
+    invocation init might add later (e.g. version probing). Tightened to
+    require both signals for a stable match.
     """
     captured: list = []
     real_run = __import__("subprocess").run
@@ -171,8 +177,12 @@ def _stub_subprocess(monkeypatch: pytest.MonkeyPatch, returncode: int = 0) -> li
             self.stderr = ""
 
     def fake_run(args: list[str], **kwargs: Any):
-        # init's first-sync call uses sys.executable as args[0].
-        if args and args[0] == sys.executable:
+        # init's first-sync call: [sys.executable, ".../sync.py", ...].
+        if (
+            len(args) >= 2
+            and args[0] == sys.executable
+            and str(args[1]).endswith("/sync.py")
+        ):
             captured.append((args, kwargs))
             return FakeProc()
         # Anything else (preflight's rsync --version, etc.) → real call.
