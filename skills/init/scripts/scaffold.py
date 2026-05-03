@@ -340,11 +340,25 @@ def register_project_in_config(
 
 
 def _new_config_dict(layout: WikiLayout) -> dict:
-    """Produce the top-level fields for a fresh `.asof.json`."""
+    """Produce the top-level fields for a fresh `.asof.json`.
+
+    Three version fields, three different things (Codex round-1 phase-3
+    CRITICAL fix):
+      - `schema_version`: the wiki-format version (currently "1.0").
+      - `min_reader_version`: lowest SKILL version that can READ this wiki.
+        Set to the current skill version (SKILL_VERSION). Newer skills
+        compare ≥ and pass.
+      - `min_writer_version`: same, for WRITE operations.
+
+    Previous bug: wrote SKILL_SCHEMA_VERSION ("1.0") into both
+    min_reader/writer fields. With plugin version "0.1.0-dev", sync's
+    compat matrix saw `0.1.0-dev < 1.0` → REFUSE, meaning fresh init
+    produced a wiki the same plugin couldn't sync.
+    """
     base: dict = {
         "schema_version": SKILL_SCHEMA_VERSION,
-        "min_reader_version": SKILL_SCHEMA_VERSION,
-        "min_writer_version": SKILL_SCHEMA_VERSION,
+        "min_reader_version": SKILL_VERSION,
+        "min_writer_version": SKILL_VERSION,
         "lint_thresholds": dict(DEFAULT_LINT_THRESHOLDS),
         "projects": [],
     }

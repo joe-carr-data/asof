@@ -262,6 +262,48 @@ def test_register_writes_fresh_pattern_a_config(tmp_path: Path) -> None:
         assert mandatory in proj["excludes"]
 
 
+def test_register_writes_skill_version_for_compat_floor(tmp_path: Path) -> None:
+    """Codex round-1 phase-3 CRITICAL fix: min_reader_version /
+    min_writer_version must be the current SKILL version, not the
+    SCHEMA version. Previous bug wrote SCHEMA "1.0" into these fields,
+    which the same plugin (running as v0.1.0-dev) then refused to sync."""
+    from _sync_bridge import SKILL_VERSION
+
+    layout = _make_layout_a(tmp_path)
+    layout.wiki_dir.mkdir()
+    config_path, _ = register_project_in_config(
+        layout, "myproject", dry_run=False
+    )
+    cfg = json.loads(config_path.read_text())
+    # The fields are skill versions, not schema versions
+    assert cfg["min_reader_version"] == SKILL_VERSION
+    assert cfg["min_writer_version"] == SKILL_VERSION
+    # schema_version is still the wiki-format version
+    assert cfg["schema_version"] == "1.0"
+
+
+def test_init_to_sync_compat_round_trip(tmp_path: Path) -> None:
+    """End-to-end: an init'd wiki must satisfy sync's compat matrix when
+    operated on by the SAME plugin version. Cell (d) — newer-or-equal skill
+    + newer-or-equal schema → ALLOWED.
+
+    Codex round-1 phase-3 CRITICAL: this test would have failed against
+    the previous code (skill 0.1.0-dev < min_reader 1.0 → REFUSE)."""
+    from _sync_bridge import load_wiki_config
+    from resolution import CompatStatus, check_version_compat
+
+    layout = _make_layout_a(tmp_path)
+    layout.wiki_dir.mkdir()
+    register_project_in_config(layout, "myproject", dry_run=False)
+
+    cfg = load_wiki_config(layout.wiki_dir)
+    result = check_version_compat(cfg)
+    assert result.status == CompatStatus.ALLOWED, (
+        f"Fresh init wiki must be compat-ALLOWED with the writing skill, "
+        f"got {result.status} ({result.message})"
+    )
+
+
 def test_register_writes_fresh_pattern_c_config(tmp_path: Path) -> None:
     """Pattern C: committed config omits wiki_dir AND project's source."""
     layout = _make_layout_c(tmp_path)
