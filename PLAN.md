@@ -355,22 +355,128 @@ SKILL.md body stays under 200 lines: trigger surface + high-level flow. Detailed
 name: lint
 description: Audit the wiki for schema violations — stale claims, missing supersession notes, orphan pages, broken source paths. Use when the user says "lint the wiki", "audit the wiki", "asof lint", "check wiki health", or after a large ingest session.
 allowed-tools: Bash(python3 *) Bash(grep *) Bash(find *) Read
-argument-hint: "[project-name (optional)] [--fix]"
+argument-hint: "[project-name (optional)] [--fix] [--json] [--severity error|warn|info]"
 ---
 ```
 
-`scripts/lint.py` runs 7 checks:
-1. **Mtime drift** — pages where `last_updated` is more than `lint_thresholds.mtime_drift_days` older than newest cited `source_mtime`. Default 30, configurable per wiki via `.asof.json`.
-2. **Supersession gap** — pages citing two sources whose `source_mtime` differ by `lint_thresholds.supersession_gap_days`+ with no supersession note in body. Default 60, configurable per wiki.
-3. **Missing mtime** — source-summary frontmatter without `source_mtime` (data quality bug).
-4. **Orphan pages** — pages with no inbound link from `index.md` or any other wiki page.
-5. **Removed-source claims** — pages with `<!-- backing source removed -->` markers.
-6. **Path mismatch** — source-summaries whose `path:` doesn't actually exist under `raw/`.
-7. **Frontmatter validity** — missing required fields per schema (`title`, `type`, `last_updated`).
+#### Pre-flight: config validity (gate, not a finding)
 
-Output: structured report grouped by severity. `--fix` flag for the safe ones (rewrite `last_updated`, add missing `_index.md` entries — never edit content). Holds the same `<wiki_dir>/.asof.lock` as sync to prevent races.
+Before any page-level checks run, lint loads `.asof.json` via the same `load_wiki_config()` that sync and init use. If the config is invalid (malformed JSON, missing version fields, missing mandatory excludes, unknown projects, etc.), lint **halts immediately** with exit code 4 and prints the underlying `ConfigError` message — it does NOT cascade into a flood of page-level findings driven by an untrusted config.
 
-**Read-only mode interaction (compat-matrix cell b):** when the skill version is in the read-only window (`min_reader_version ≤ skill_version < min_writer_version`), `lint` runs *report-only*. `--fix` is **rejected** with a clear "read-only mode — upgrade asof to ≥ `<min_writer_version>`" message. The lint report itself is unaffected; only the auto-repair side-effect is blocked.
+This mirrors init's "refuse to mutate an invalid config" policy from round-1 phase-3 HIGH 3 (Codex round-2 forward-look advice).
+
+#### The 7 checks
+
+`scripts/lint.py` runs 7 page-level checks (all on a per-project basis, parallel-safe across projects):
+
+| # | Check | Severity | What it detects |
+|---|---|---|---|
+| 1 | **Frontmatter validity** | ERROR | Missing required fields per SCHEMA §3 (`title`, `type`, `project`, `last_updated`). For source-summary pages: missing `sources`, missing `source_mtime`, or `source_mtime` not parseable as ISO date. |
+| 2 | **Path mismatch** | ERROR | Source-summaries whose `sources[].path` doesn't exist under `raw/<project>/`. (Distinguishes from `removed_upstream`-marked pages, which are intentional and skipped.) |
+| 3 | **Missing mtime** | ERROR | Source-summary frontmatter without `source_mtime` (data quality bug — should never happen post-sync, but guards against hand-edits). |
+| 4 | **Removed-source claims** | WARN | Pages with `<!-- backing source removed -->` markers — historical record kept per schema §6.5, but flagged so the agent can decide whether to update related pages. |
+| 5 | **Mtime drift** | WARN | Pages where `last_updated` is more than `lint_thresholds.mtime_drift_days` older than the newest cited `source_mtime`. Default `30`, configurable per wiki via `.asof.json`. |
+| 6 | **Supersession gap** | WARN | Pages citing two sources whose `source_mtime` differ by ≥ `lint_thresholds.supersession_gap_days` with no `superseded` / `Previously X — superseded by Y` note in body. Default `60`, configurable. |
+| 7 | **Orphan pages** | INFO | Pages with no inbound link from `index.md`, `_candidates.md`, or any other wiki page in the project. (`current_state.md` is exempt — it links outward, not inward.) |
+
+#### `--fix` boundaries (extremely narrow)
+
+Out of the 7 checks, **only 2** are auto-fixable, and only in their unambiguous variants:
+
+| # | Check | `--fix` action | Refused when |
+|---|---|---|---|
+| 1 | Frontmatter validity | When `last_updated` is **missing entirely** (not just stale), insert today's date. Refuse to overwrite an existing-but-stale value (semantic decision). | `last_updated` exists with any value; or any other required field is missing. |
+| 7 | Orphan pages | Append a one-line `- [Title](relative-path.md)` entry to `index.md` under the matching `## <type-section>` (Entities / Concepts / Source summaries / etc.). | Page lacks a parseable `title` or `type`; or the appropriate section doesn't exist in `index.md`. |
+
+All other checks are **report-only**. Specifically, `--fix` does NOT:
+- Edit page bodies (semantic decisions belong to the agent).
+- Rewrite `last_updated` for stale-but-present values (would lie about edit recency).
+- Add supersession notes (semantic).
+- Delete or rename pages flagged by other checks.
+- Touch `current_state.md`, `log.md`, or `_candidates.md`.
+
+`--fix` rewrites are atomic (temp-then-rename via `atomic_write_text`), and lint holds `<wiki_dir>/.asof.lock` (same lock as sync) for the duration to prevent races.
+
+#### Read-only mode interaction (compat-matrix cell b)
+
+When the skill version is in the read-only window (`min_reader_version ≤ skill_version < min_writer_version`), `lint` runs **report-only**. `--fix` is **rejected with exit code 4** and a clear "read-only mode — upgrade asof to ≥ `<min_writer_version>`" message. The lint report itself is unaffected; only the auto-repair side-effect is blocked.
+
+#### Output format
+
+Two output modes, selected by `--json`:
+
+**Default (human-readable text):**
+```
+asof:lint <wiki_dir>  (project: <slug>)
+
+ERRORS (3):
+  wiki/myproj/sources/foo.md:1   path-mismatch    raw/myproj/foo.md does not exist
+  wiki/myproj/sources/bar.md:5   missing-mtime    sources[0] has no source_mtime
+  wiki/myproj/entities/x.md:1    frontmatter      missing required field 'title'
+
+WARNINGS (2):
+  wiki/myproj/concepts/y.md      mtime-drift      last_updated 2026-01-10, newest source_mtime 2026-04-22 (102d drift > 30d)
+  wiki/myproj/sources/z.md       removed-source   <!-- backing source removed --> marker present
+
+INFO (1):
+  wiki/myproj/concepts/orphan.md orphan-page      no inbound links from index.md or other pages
+
+Summary: 3 errors, 2 warnings, 1 info across 47 pages.
+```
+
+**`--json` (machine-readable, for CI):**
+```json
+{
+  "wiki_dir": "/path/to/wiki",
+  "skill_version": "1.0.0",
+  "projects": [
+    {
+      "name": "myproj",
+      "page_count": 47,
+      "findings": [
+        {"severity": "ERROR", "check": "path-mismatch", "page": "wiki/myproj/sources/foo.md", "line": 1, "message": "..."},
+        ...
+      ]
+    }
+  ],
+  "summary": {"errors": 3, "warnings": 2, "info": 1}
+}
+```
+
+`--severity error|warn|info` filters output to the named threshold and above (default: `info`, i.e. report everything).
+
+#### CLI flags
+
+| Flag | Effect |
+|---|---|
+| `[project-name]` | Lint only the named project (positional). Omit to lint **all** configured projects. |
+| `--fix` | Apply auto-fixes for the 2 narrow cases above. Rejected in read-only mode. |
+| `--json` | Emit JSON instead of human-readable text. |
+| `--severity LEVEL` | Filter to `error`, `warn`, or `info` (default: `info`). |
+| `--non-interactive` | No prompts. Auto-detected from non-TTY stdin. |
+| `--version` | Print version and exit. |
+
+#### Exit codes
+
+| Code | Meaning |
+|---|---|
+| 0 | Clean — no findings at or above the configured severity. |
+| 1 | Findings present (ERROR or WARN). INFO-only does NOT trigger 1 unless `--severity info`. |
+| 2 | Lint failed for an internal reason (template / I/O error). |
+| 3 | `--fix` requested but a fixable finding could not be applied. |
+| 4 | Pre-flight failure: invalid config, or `--fix` refused due to read-only mode. |
+
+#### Per-project scoping
+
+When `[project-name]` is omitted, lint runs against every project in `.asof.json`. Findings are grouped per project in both text and JSON output. A project-level error (e.g. project's `wiki_subdir` missing entirely) is reported once at the project boundary, not multiplied across pages.
+
+When a project name is given but doesn't match any configured project, exit 4 with a list of valid project names.
+
+#### Held lock
+
+Lint holds `<wiki_dir>/.asof.lock` for the duration of the run (same lock as sync) so a concurrent sync can't change the corpus mid-lint. Lock acquisition is `fcntl.flock` (LOCK_EX, blocking); a 30s timeout falls back to LOCK_NB and exits 2 with a "lock held by another process" message.
+
+`--fix` requires the exclusive lock; `--dry-run --fix` reports what would be fixed without writing anything (lock is still held briefly to read consistently).
 
 ## 7. Schema spec (`references/SCHEMA.md`)
 
