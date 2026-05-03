@@ -24,6 +24,7 @@ Exit codes:
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import sys
@@ -57,13 +58,32 @@ def main(
     Returns:
         Exit code (always 0 for hooks; non-zero would surface as an error
         in PostToolUse, which we don't want for a benign reminder).
+        Wrapped in try/except so filesystem errors (unwritable wiki_dir,
+        invalid path, etc.) never propagate as a non-zero exit.
 
     Side effects:
         - Writes JSON to stdout with `hookSpecificOutput.additionalContext`
-          if a reminder should be emitted.
-        - Touches `<wiki_dir>/.pending-sync/<project>.stamp` to mark the
-          debounce window.
+          if a reminder should be emitted (and we won the debounce claim).
+        - Atomically claims `<wiki_dir>/.pending-sync/<project>.stamp`
+          via O_EXCL — concurrent invocations from a 50-file MultiEdit
+          all race against this single atomic creation; only one wins
+          and emits.
     """
+    try:
+        return _main_inner(stdin_text, env, now=now)
+    except Exception:  # noqa: BLE001 — defensive top-level guard
+        # PostToolUse contract: never raise. Any internal failure
+        # (missing perms, malformed env path, etc.) becomes a silent
+        # no-op so the user's tool call isn't surfaced as a hook error.
+        return 0
+
+
+def _main_inner(
+    stdin_text: str,
+    env: dict[str, str],
+    *,
+    now: float | None = None,
+) -> int:
     project_root = env.get("ASOF_PROJECT_ROOT", "").strip()
     project_name = env.get("ASOF_PROJECT_NAME", "").strip()
     wiki_dir = env.get("ASOF_DIR", "").strip()
@@ -79,10 +99,14 @@ def main(
     if not _should_fire(payload, project_root):
         return 0
 
-    if _is_within_debounce_window(wiki_dir, project_name, now=now):
-        return 0  # Recently emitted — silent.
+    # Atomic debounce claim (Codex round-1 phase-2 HIGH fix). Replaces the
+    # TOCTOU "check then stamp" pattern that let parallel hook invocations
+    # all observe "no stamp" and emit. O_EXCL gives at-most-one winner per
+    # debounce window; runners-up either find a fresh stamp (suppressed)
+    # or refresh a stale stamp (emit, then suppress further N seconds).
+    if not _claim_debounce_slot(wiki_dir, project_name, now=now):
+        return 0
 
-    _stamp_debounce(wiki_dir, project_name, now=now)
     rel_path = _relative_path(payload, project_root)
     sync_in_progress = _lock_held(wiki_dir)
     message = _build_message(project_name, rel_path, wiki_dir, sync_in_progress)
@@ -132,31 +156,52 @@ def _relative_path(payload: dict[str, Any], project_root: str) -> str:
         return file_path
 
 
-def _is_within_debounce_window(
+def _claim_debounce_slot(
     wiki_dir: str, project_name: str, *, now: float | None = None
 ) -> bool:
-    """True if the per-project debounce stamp was touched within DEBOUNCE_SECONDS."""
-    stamp = Path(wiki_dir) / ".pending-sync" / f"{project_name}.stamp"
-    if not stamp.is_file():
-        return False
-    try:
-        last = stamp.stat().st_mtime
-    except OSError:
-        return False
-    current = now if now is not None else time.time()
-    return (current - last) < DEBOUNCE_SECONDS
+    """Atomically claim the per-project debounce slot.
 
+    Returns True if this caller wins the slot (and should emit a reminder),
+    False if another caller already holds it within the suppression window.
 
-def _stamp_debounce(
-    wiki_dir: str, project_name: str, *, now: float | None = None
-) -> None:
-    """Touch the per-project debounce stamp to start the suppression window."""
+    Uses O_EXCL exclusive-creation semantics so parallel hook invocations
+    from a single MultiEdit batch race deterministically against one another:
+    exactly one process succeeds in creating the stamp file; the others
+    observe `FileExistsError` and either:
+
+      - find a fresh stamp (within DEBOUNCE_SECONDS) and suppress, or
+      - find a stale stamp and refresh it (emit + reset window).
+
+    Edge case: at the boundary between "stale" and "fresh" two callers
+    may both refresh and emit — acceptable; the cost is one extra
+    reminder, never silent suppression of a real change.
+
+    Test seam: `now` overrides `time.time()` for deterministic tests.
+    """
     stamp_dir = Path(wiki_dir) / ".pending-sync"
     stamp_dir.mkdir(parents=True, exist_ok=True)
     stamp = stamp_dir / f"{project_name}.stamp"
-    stamp.touch()
-    if now is not None:
-        os.utime(stamp, (now, now))
+    current = now if now is not None else time.time()
+
+    try:
+        # O_EXCL creates the file or raises FileExistsError — atomic.
+        fd = os.open(stamp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+        os.close(fd)
+        os.utime(stamp, (current, current))
+        return True  # We won the race.
+    except FileExistsError:
+        try:
+            last = stamp.stat().st_mtime
+        except OSError:
+            return True  # Can't read stamp — permissive emit.
+        if (current - last) < DEBOUNCE_SECONDS:
+            return False  # Fresh stamp held by another caller — suppress.
+        # Stale stamp — refresh and emit. (Two parallel callers may both
+        # do this; both emit. Acceptable — the alternative is silent
+        # suppression of a real change after a long quiet period.)
+        with contextlib.suppress(OSError):
+            os.utime(stamp, (current, current))
+        return True
 
 
 def _lock_held(wiki_dir: str) -> bool:

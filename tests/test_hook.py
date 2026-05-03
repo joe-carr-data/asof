@@ -168,6 +168,53 @@ def test_silent_on_malformed_input(
     assert capsys.readouterr().out == ""
 
 
+# ─── never-throw guarantee (gpt-5.2-pro round-1 phase-2 CRITICAL) ──────────
+
+
+def test_returns_zero_on_unwritable_wiki_dir(
+    hook_main, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    """The hook must NEVER let a filesystem error escape as a non-zero exit.
+    PostToolUse contract: hook errors surface to the user as broken tool
+    calls, which is wrong semantics for a benign reminder.
+
+    Simulate by pointing ASOF_DIR at an unwritable parent.
+    """
+    project = tmp_path / "proj"
+    project.mkdir()
+    md = project / "x.md"
+    md.write_text("# x")
+
+    # Make a parent dir read-only so .pending-sync/ can't be created.
+    readonly = tmp_path / "readonly"
+    readonly.mkdir(mode=0o555)
+    wiki = readonly / "wiki"
+    # mkdir() inside a 0o555 dir will fail — the hook must catch this.
+    try:
+        rc = hook_main(
+            _payload(file_path=str(md)),
+            _env(project_root=project, wiki_dir=wiki),
+        )
+        assert rc == 0
+    finally:
+        # Restore perms so pytest cleanup doesn't fail
+        readonly.chmod(0o755)
+
+
+def test_returns_zero_on_corrupted_payload_with_unexpected_shape(
+    hook_main, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    """Edge case: valid JSON but unexpected structure (no tool_input, etc.)."""
+    project = tmp_path / "proj"
+    project.mkdir()
+    rc = hook_main(
+        '{"unexpected": "shape"}',
+        _env(project_root=project, wiki_dir=tmp_path / "wiki"),
+    )
+    assert rc == 0
+    assert capsys.readouterr().out == ""
+
+
 # ─── debounce (per-project) ────────────────────────────────────────────────
 
 
@@ -260,6 +307,58 @@ def test_debounce_creates_per_project_stamp(
     )
     stamp = wiki / ".pending-sync" / "demo.stamp"
     assert stamp.is_file()
+
+
+# ─── atomic O_EXCL claim (gpt-5.2-pro round-1 phase-2 HIGH) ────────────────
+
+
+def test_atomic_claim_fresh_stamp_suppresses(
+    hook_main, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    """If another process already created a fresh stamp via O_EXCL, this
+    invocation must NOT emit (it lost the race). Simulates parallel-fire."""
+    project = tmp_path / "proj"
+    project.mkdir()
+    wiki = tmp_path / "wiki"
+    md = project / "x.md"
+    md.write_text("# x")
+    env = _env(project_root=project, wiki_dir=wiki)
+
+    # Pre-create the stamp at "now" to simulate winner-already-claimed
+    stamp_dir = wiki / ".pending-sync"
+    stamp_dir.mkdir(parents=True)
+    stamp = stamp_dir / "demo.stamp"
+    stamp.touch()
+    os.utime(stamp, (1000.0, 1000.0))
+
+    rc = hook_main(_payload(file_path=str(md)), env, now=1010.0)  # within 30s
+    assert rc == 0
+    assert capsys.readouterr().out == ""
+
+
+def test_atomic_claim_stale_stamp_refreshes_and_emits(
+    hook_main, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    """If the existing stamp is stale (>DEBOUNCE_SECONDS old), the hook
+    refreshes it and emits."""
+    project = tmp_path / "proj"
+    project.mkdir()
+    wiki = tmp_path / "wiki"
+    md = project / "x.md"
+    md.write_text("# x")
+    env = _env(project_root=project, wiki_dir=wiki)
+
+    stamp_dir = wiki / ".pending-sync"
+    stamp_dir.mkdir(parents=True)
+    stamp = stamp_dir / "demo.stamp"
+    stamp.touch()
+    os.utime(stamp, (1000.0, 1000.0))  # very old
+
+    rc = hook_main(_payload(file_path=str(md)), env, now=2000.0)  # >> 30s later
+    assert rc == 0
+    assert capsys.readouterr().out  # emitted
+    # Stamp mtime refreshed to 2000.0
+    assert stamp.stat().st_mtime == pytest.approx(2000.0, abs=1.0)
 
 
 # ─── lock detection ─────────────────────────────────────────────────────────
