@@ -107,7 +107,7 @@ Three version numbers travel with every wiki: `schema_version`,
 `min_reader_version`, `min_writer_version`. The four-cell matrix
 (refuse / read-only / require-`--migrate` / proceed) prevents silent
 corruption when skill and wiki versions diverge. See [SCHEMA.md](SCHEMA.md)
-§11.
+§12 (the `.last-sync` JSON shape now lives at §11).
 
 ### 5. Production rigor
 

@@ -47,7 +47,17 @@ jq '.totals.total_changes' .last-sync/<project>.json
 jq '.totals' .last-sync/<project>.json
 ```
 
-If `totals.total_changes == 0`: the wiki is already current. Nothing for you to do. Append a single `## [<date>] sync | no deltas` line to `log.md` (the `sync` action is allowed in SCHEMA §8 specifically for this case) and return.
+**Always log the sync first**, before branching on delta count. The `sync` action in `log.md` is the audit-trail anchor every ingest cycle starts with. Use the schema-conformant format from SCHEMA.md §8:
+
+```markdown
+## [YYYY-MM-DD] sync | raw/<project>/ | deltas: NEW=N MODIFIED=M DELETED=K
+- rsync: transferred=<n> deleted=<k>
+- (one-line note when N+M+K == 0: "wiki up to date")
+```
+
+(Counts are pulled directly from the `totals` object in the JSON.)
+
+If `totals.total_changes == 0`: the wiki is already current. The `sync` log entry above is the only update needed; return.
 
 If `totals.total_changes > 10`: surface the count to the user before proceeding. They may want to scope down (`--summary-only` re-run, partial ingest, etc.). Don't silently process 50 files at once.
 
@@ -150,7 +160,18 @@ After processing all entity / concept changes, re-read `current_state.md` and up
 
 For each entry in `deltas.modified`:
 
-### 4.1 Read both versions
+### 4.1 Capture old + new mtime from the delta record (SCHEMA Rule 1)
+
+Both mtimes are in the delta record. Capture them before reading any content:
+
+```bash
+OLD_MTIME=$(jq -r ".deltas.modified[] | select(.rel_path == \"<rel_path>\") | .old_mtime" .last-sync/<project>.json)
+NEW_MTIME=$(jq -r ".deltas.modified[] | select(.rel_path == \"<rel_path>\") | .new_mtime" .last-sync/<project>.json)
+```
+
+The old mtime goes into the `previous_mtimes:` list; the new mtime replaces the current `source_mtime`. Never invent either; never re-stat.
+
+### 4.2 Read both versions
 
 ```bash
 # The (now-current) raw version
@@ -160,7 +181,7 @@ cat <wiki_dir>/raw/<project>/<rel_path>
 cat <wiki_dir>/wiki/<project>/sources/<mirror-of-rel-path>.md
 ```
 
-### 4.2 Apply self-supersession
+### 4.3 Apply self-supersession
 
 In the source-summary:
 
@@ -183,14 +204,14 @@ In the source-summary:
 Implications: <what entity / concept pages should change>.
 ```
 
-### 4.3 Re-evaluate cited pages
+### 4.4 Re-evaluate cited pages
 
 Find every entity / concept page that cites this source (grep their `sources:` frontmatter for the path). For each:
 
 - If a claim there was based on the *old* content and the *new* content contradicts it, apply the standard supersession pattern (§6).
 - If the claim is still consistent with the new version, no change.
 
-### 4.4 Update `current_state.md` if needed
+### 4.5 Update `current_state.md` if needed
 
 Same as §3.6 — flip statuses, refresh counters, record the supersession.
 

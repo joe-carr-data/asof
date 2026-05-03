@@ -17,7 +17,7 @@ grep "^## \[" log.md | tail -5            # last 5 entries
 grep "^## \[2026" log.md                  # all 2026 entries
 ```
 
-Format (per [SCHEMA.md §8](../../references/SCHEMA.md#8-log-format)):
+Format (per SCHEMA.md §8 — see `<wiki_dir>/CLAUDE.md` for the plugin path that hosts the full spec):
 
 ```
 ## [YYYY-MM-DD] action | source-or-page | mtime=YYYY-MM-DD
@@ -25,8 +25,9 @@ Format (per [SCHEMA.md §8](../../references/SCHEMA.md#8-log-format)):
 - pages touched: comma-separated relative paths
 ```
 
-Allowed actions: `ingest`, `self-supersession`, `removed-upstream`, `query`,
-`lint`, `mtime-correction`, `tooling-fix`. See SCHEMA.md for when to use each.
+Allowed actions: `scaffold`, `ingest`, `sync`, `self-supersession`,
+`removed-upstream`, `candidate-promoted`, `query`, `lint`, `mtime-correction`,
+`tooling-fix`, `ingest-aborted`. See SCHEMA.md §8 for when to use each.
 
 ---
 

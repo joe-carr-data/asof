@@ -223,7 +223,13 @@ These are the headline rules. Apply them on every ingest.
 
 ### Rule 1 — Read mtime first
 
-Before reading any source's content, record its `source_mtime` (via `stat`) in the source-summary's frontmatter. The mtime is the most important field in the schema — it is how the wiki distinguishes stale claims from current ones.
+Before reading any source's content, record its `source_mtime` in the source-summary's frontmatter. The mtime is the most important field in the schema — it is how the wiki distinguishes stale claims from current ones.
+
+The canonical carrier of `source_mtime` depends on the entry point:
+- When ingesting from an `asof:sync` delta report: use the value already recorded in `<wiki_dir>/.last-sync/<project>.json` (the sync skill captured it via `stat` at sync time). Do not re-stat the file.
+- When ingesting outside of `asof:sync` (rare): capture the mtime via `stat -f "%Sm" -t "%Y-%m-%d" <path>` (macOS) or `stat -c %y <path>` (GNU) before reading content.
+
+Either way, the rule is the same: never invent the mtime, never re-derive it from the content, never let the content read happen before the mtime is captured.
 
 ### Rule 2 — Newer source wins (cross-source supersession)
 
@@ -262,6 +268,8 @@ Every project has four required bookkeeping files at `wiki/<project>/`:
 ### `index.md`
 
 Content catalog. One line per page, grouped by category. The agent updates it on every ingest. Used by future skills (and humans) to navigate the wiki without traversing the full tree.
+
+*(Frontmatter omitted in the body example below for brevity; every bookkeeping page still begins with the §3 frontmatter block — `type: overview`, no `sources` required.)*
 
 ```markdown
 # <project> wiki — index

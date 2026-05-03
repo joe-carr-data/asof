@@ -10,7 +10,7 @@ last_updated: {{TODAY}}
 # {{PROJECT_NAME}} — current state
 
 > The headline synthesis for this project. Always reflects the **latest**
-> claims (per [SCHEMA.md §6](../../references/SCHEMA.md#6-time-aware-ingest-rules)
+> claims (per SCHEMA.md §6 — see `<wiki_dir>/CLAUDE.md` for the plugin path that hosts the full spec
 > Rule 3). Historical claims contribute via supersession notes, never by
 > polluting the current state.
 
