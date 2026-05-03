@@ -82,7 +82,15 @@ class IntegrationRequest:
 
 @dataclasses.dataclass(frozen=True)
 class IntegrationResult:
-    """What apply_integrations() actually did."""
+    """What apply_integrations() actually did.
+
+    Per-step errors recorded in `errors` (Codex round-1 phase-3 HIGH 2):
+    each step runs independently; if one fails, later steps still run.
+    `errors` is a tuple of (step_name, error_message) for every step
+    that raised. The corresponding boolean (snippet_appended /
+    hook_installed / etc.) stays False so callers can detect partial
+    success.
+    """
 
     snippet_appended: bool
     snippet_skipped_already_present: bool
@@ -93,7 +101,12 @@ class IntegrationResult:
     additional_dir_already_present: bool
     first_sync_ran: bool
     first_sync_exit_code: int | None
+    errors: tuple[tuple[str, str], ...]
     dry_run: bool
+
+    @property
+    def has_errors(self) -> bool:
+        return bool(self.errors)
 
 
 # ─── 1) CLAUDE.md snippet ──────────────────────────────────────────────────
@@ -372,23 +385,43 @@ def apply_integrations(
 ) -> IntegrationResult:
     """Run every requested integration. Failures in one don't abort others.
 
+    Per-step exception capture (Codex round-1 phase-3 HIGH 2): each step
+    runs in its own try/except. OSError, RuntimeError, FileNotFoundError,
+    and PermissionError are recorded into the `errors` tuple and the
+    corresponding boolean stays False; the next step still runs. Other
+    exceptions (TypeError, AttributeError, etc. — programmer bugs) still
+    propagate so they don't get silently swallowed.
+
+    PLAN.md §316 specifies this partial-failure behavior. Previous code
+    let any unexpected OSError abort the remaining integrations.
+
     Order matters:
       1. Snippet first (no side effects beyond the user's CLAUDE.md).
       2. Hook script copy (prerequisite for hook entry in settings).
       3. Settings update (depends on hook script being in place).
       4. First sync last (depends on .asof.json + raw/ existing).
     """
+    errors: list[tuple[str, str]] = []
+
     snippet_appended = False
     snippet_skipped = False
     if request.choices.install_claudemd_snippet:
-        snippet_appended, snippet_skipped = append_claudemd_snippet(
-            request, today=today, dry_run=dry_run
-        )
+        try:
+            snippet_appended, snippet_skipped = append_claudemd_snippet(
+                request, today=today, dry_run=dry_run
+            )
+        except (OSError, RuntimeError) as exc:
+            errors.append(("CLAUDE.md snippet", _format_step_error(exc)))
 
     hook_installed = False
     hook_skipped = False
     if request.choices.install_hook:
-        hook_installed, hook_skipped = install_hook(request, dry_run=dry_run)
+        try:
+            hook_installed, hook_skipped = install_hook(
+                request, dry_run=dry_run
+            )
+        except (OSError, RuntimeError) as exc:
+            errors.append(("hook install", _format_step_error(exc)))
 
     settings_path: Path | None = None
     additional_added = False
@@ -397,16 +430,22 @@ def apply_integrations(
         request.choices.add_additional_directories
         or request.choices.install_hook
     ):
-        settings_path, additional_added, additional_already_present = (
-            update_settings(request, dry_run=dry_run)
-        )
+        try:
+            settings_path, additional_added, additional_already_present = (
+                update_settings(request, dry_run=dry_run)
+            )
+        except (OSError, RuntimeError) as exc:
+            errors.append(("settings update", _format_step_error(exc)))
 
     first_sync_ran = False
     first_sync_exit: int | None = None
     if request.choices.run_first_sync:
-        first_sync_ran, first_sync_exit = run_first_sync(
-            request, dry_run=dry_run
-        )
+        try:
+            first_sync_ran, first_sync_exit = run_first_sync(
+                request, dry_run=dry_run
+            )
+        except (OSError, RuntimeError) as exc:
+            errors.append(("first sync", _format_step_error(exc)))
 
     return IntegrationResult(
         snippet_appended=snippet_appended,
@@ -418,5 +457,11 @@ def apply_integrations(
         additional_dir_already_present=additional_already_present,
         first_sync_ran=first_sync_ran,
         first_sync_exit_code=first_sync_exit,
+        errors=tuple(errors),
         dry_run=dry_run,
     )
+
+
+def _format_step_error(exc: BaseException) -> str:
+    """One-line error string for the per-step error log."""
+    return f"{type(exc).__name__}: {exc}"

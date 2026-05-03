@@ -325,6 +325,16 @@ def _print_integration_summary(result: IntegrationResult) -> None:
     if result.first_sync_ran:
         glyph = "✓" if result.first_sync_exit_code == 0 else "✗"
         print(f"  {glyph} first sync exit code: {result.first_sync_exit_code}")
+    if result.has_errors:
+        print()
+        print("  ⚠ Some integrations failed (init continued — partial success):")
+        for step_name, msg in result.errors:
+            print(f"    ✗ {step_name}: {msg}")
+        print(
+            "    Re-run /asof:init for the failed step(s), or fix the "
+            "underlying issue (permissions, malformed JSON, etc.) and "
+            "re-run with the same project_name to retry."
+        )
 
 
 def _print_final_summary(

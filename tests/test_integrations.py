@@ -457,3 +457,82 @@ def test_apply_integrations_dry_run_no_filesystem_writes(
     assert not (request.project_root / "CLAUDE.md").exists()
     assert not (request.project_root / ".claude").exists()
     assert called == []
+
+
+# ─── partial-failure handling (Codex round-1 phase-3 HIGH 2) ──────────────
+
+
+def test_apply_integrations_no_errors_on_clean_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A clean run produces an empty errors tuple and has_errors=False."""
+    monkeypatch.setattr(
+        "integrations.subprocess.run",
+        lambda *_a, **_k: type("P", (), {"returncode": 0})(),
+    )
+    request = _build_request(tmp_path)
+    result = apply_integrations(request, today=TODAY, dry_run=False)
+    assert result.errors == ()
+    assert result.has_errors is False
+
+
+def test_apply_integrations_settings_failure_does_not_abort_first_sync(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Malformed settings.json raises RuntimeError in update_settings, but
+    apply_integrations still runs the first sync afterwards. The failure is
+    captured in errors[]; other steps still report success."""
+    sync_called: list[bool] = []
+
+    def fake_run(*_a: Any, **_k: Any) -> Any:
+        sync_called.append(True)
+        return type("P", (), {"returncode": 0})()
+
+    monkeypatch.setattr("integrations.subprocess.run", fake_run)
+    request = _build_request(tmp_path)
+    # Pre-create a malformed settings.local.json that update_settings rejects.
+    settings_dir = request.project_root / ".claude"
+    settings_dir.mkdir(parents=True)
+    (settings_dir / "settings.local.json").write_text("{not json", encoding="utf-8")
+
+    result = apply_integrations(request, today=TODAY, dry_run=False)
+
+    assert result.has_errors is True
+    assert len(result.errors) == 1
+    step_name, msg = result.errors[0]
+    assert step_name == "settings update"
+    assert "RuntimeError" in msg or "not valid JSON" in msg
+    # Other steps before settings still succeeded
+    assert result.snippet_appended is True
+    assert result.hook_installed is True
+    # First sync still ran (didn't get aborted by the settings failure)
+    assert sync_called == [True]
+    assert result.first_sync_ran is True
+
+
+def test_apply_integrations_snippet_failure_does_not_abort_hook(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When snippet-append raises OSError, hook install + settings still run.
+    The snippet failure is captured in errors[]."""
+    monkeypatch.setattr(
+        "integrations.subprocess.run",
+        lambda *_a, **_k: type("P", (), {"returncode": 0})(),
+    )
+
+    def boom(*_a: Any, **_k: Any) -> Any:
+        raise OSError("simulated CLAUDE.md write failure")
+
+    monkeypatch.setattr("integrations.append_claudemd_snippet", boom)
+
+    request = _build_request(tmp_path)
+    result = apply_integrations(request, today=TODAY, dry_run=False)
+
+    assert result.has_errors is True
+    assert any(step == "CLAUDE.md snippet" for step, _ in result.errors)
+    # Snippet did not record success
+    assert result.snippet_appended is False
+    # Hook + settings + first sync still ran
+    assert result.hook_installed is True
+    assert result.settings_path is not None
+    assert result.first_sync_ran is True
