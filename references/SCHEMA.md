@@ -20,7 +20,8 @@ This is the v1.0 schema. Changes to anything in this document follow the discipl
 8. [Log format](#8-log-format)
 9. [Candidate promotion](#9-candidate-promotion)
 10. [Lint rules](#10-lint-rules)
-11. [Schema-version compatibility matrix](#11-schema-version-compatibility-matrix)
+11. [Last-sync delta report (`.last-sync/<project>.json`)](#11-last-sync-delta-report-wiki_dirlast-syncprojectjson)
+12. [Schema-version compatibility matrix](#12-schema-version-compatibility-matrix)
 
 ---
 
@@ -311,13 +312,17 @@ The headline synthesis, one per project. Always reflects the latest claims (see 
 
 | Action | When to log | Required body fields |
 |---|---|---|
+| `scaffold` | When a wiki dir or project subtree is first bootstrapped by `asof:init` | brief description of what was created |
 | `ingest` | After a NEW or MODIFIED source is integrated | `pages touched`, optional `candidates updated` / `supersedes` |
+| `sync` | After every `asof:sync` invocation, even when no deltas were detected | `deltas: NEW=N MODIFIED=M DELETED=K` (zero counts allowed) |
 | `self-supersession` | When a source-summary gets a `previous_mtimes` bump | `pages touched` (cite all entity / concept pages re-evaluated) |
 | `removed-upstream` | When a source disappears and is marked `removed_upstream` | `pages touched`, `orphan claims` (count of `<!-- backing source removed -->` markers added) |
+| `candidate-promoted` | When a `_candidates.md` entry hits the promotion threshold and is moved to `concepts/` | `from: <count>` (mentions when promoted), `to: concepts/<slug>.md` |
 | `query` | After answering a non-trivial user question (optional but useful) | one-line answer summary |
 | `lint` | After every `asof:lint` invocation | `findings: <count>`, `auto-fixed: <count>` |
 | `mtime-correction` | Bookkeeping fix (see §3 `mtime_corrected`) | the corrected source path + old/new mtime |
 | `tooling-fix` | Skill / config / process changes | what was fixed |
+| `ingest-aborted` | Mid-ingest abort (Ctrl-C, error) so the next run knows the partial state | which delta types were processed before the abort |
 
 ---
 
@@ -365,7 +370,52 @@ In **read-only mode** (compat-matrix cell b), `asof:lint --fix` is rejected — 
 
 ---
 
-## 11. Schema-version compatibility matrix
+## 11. Last-sync delta report (`<wiki_dir>/.last-sync/<project>.json`)
+
+`asof:sync` writes a per-project JSON report to `<wiki_dir>/.last-sync/<project>.json` after every successful sync (skipped in `--dry-run` mode). This is the canonical machine-readable record of the most recent delta detection — what `asof:lint` and the agent's ingest procedure consume.
+
+Top-level shape:
+
+```json
+{
+  "schema_version": "1.0",
+  "asof_version": "0.1.0-dev",
+  "project_name": "<slug>",
+  "raw_subdir": "raw/<project>",
+  "wiki_subdir": "wiki/<project>",
+  "rsync": {
+    "succeeded": true,
+    "return_code": 0,
+    "transferred": 5,
+    "deleted": 2,
+    "dry_run": false
+  },
+  "deltas": {
+    "new": [{"rel_path": "...", "mtime": "YYYY-MM-DD"}],
+    "modified": [{"rel_path": "...", "old_mtime": "YYYY-MM-DD", "new_mtime": "YYYY-MM-DD"}],
+    "deleted": [{"raw_path": "raw/<project>/...", "summary_path": "/abs/path/sources/...md"}],
+    "skipped_symlinks": [{"rel_path": "...", "target": "..."}]
+  },
+  "totals": {
+    "new": N,
+    "modified": M,
+    "deleted": K,
+    "skipped_symlinks": S,
+    "total_changes": N + M + K
+  },
+  "timestamp": "YYYY-MM-DDTHH:MM:SS+00:00"
+}
+```
+
+Notes:
+- `rsync` may be `null` when sync didn't run rsync (e.g. dry-run paths).
+- `total_changes` deliberately excludes `skipped_symlinks` — symlinks are informational, not changes the agent must ingest.
+- Atomic writes via temp-then-rename so a kill mid-write leaves either the previous file or the new one, never a partial.
+- One file per project (path-traversal-safe via project slugification at sync time).
+
+The producer is `skills/sync/scripts/report.py:serialize_to_dict`. The consumers are the agent's ingest procedure (see [INGEST_PROCEDURE.md §2](INGEST_PROCEDURE.md#2-reading-the-delta-report)) and `asof:lint` (phase 4).
+
+## 12. Schema-version compatibility matrix
 
 The full four-cell matrix from PLAN.md section 2.
 

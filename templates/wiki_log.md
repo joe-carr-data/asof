@@ -34,3 +34,5 @@ Allowed actions: `ingest`, `self-supersession`, `removed-upstream`, `query`,
 - Folders created: entities/, concepts/, sources/
 - Seed files: index.md, _candidates.md, current_state.md, log.md
 - Bootstrapped from asof v{{ASOF_VERSION}}, schema v1.0
+
+(`scaffold` action documented in SCHEMA.md §8.)

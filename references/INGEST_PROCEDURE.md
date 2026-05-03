@@ -27,7 +27,7 @@ Before starting an ingest cycle, verify:
 
 - [ ] `asof:sync` ran successfully (exit 0). The delta report lives at `<wiki_dir>/.last-sync/<project>.json`.
 - [ ] You are operating against the wiki dir reported in the sync output, not a different wiki.
-- [ ] No other Claude Code session is mid-ingest (the wiki has no `.asof.lock` held — if it does, the previous run is still active; wait or abort).
+- [ ] No other Claude Code session is mid-ingest. **Note:** `<wiki_dir>/.asof.lock` is created on first sync and persists between runs as a marker; its presence does *not* mean a run is currently active (the kernel-level `flock` is what determines that, and the file mtime is a weak hint at best). If you suspect a concurrent ingest, ask the user before proceeding.
 
 If any precondition fails, report the issue to the user and stop.
 
@@ -35,7 +35,7 @@ If any precondition fails, report the issue to the user and stop.
 
 ## 2. Reading the delta report
 
-Open `<wiki_dir>/.last-sync/<project>.json`. The shape is documented in [SCHEMA.md](SCHEMA.md) §11 (matches the JSON written by `report.py`).
+Open `<wiki_dir>/.last-sync/<project>.json`. The shape is documented in [SCHEMA.md §11](SCHEMA.md#11-last-sync-delta-report-wiki_dirlast-syncprojectjson) (matches the JSON written by `skills/sync/scripts/report.py:serialize_to_dict`).
 
 Quick triage:
 
@@ -47,7 +47,7 @@ jq '.totals.total_changes' .last-sync/<project>.json
 jq '.totals' .last-sync/<project>.json
 ```
 
-If `totals.total_changes == 0`: the wiki is already current. Nothing for you to do. Append a single `## [<date>] sync | no deltas` line to `log.md` and return.
+If `totals.total_changes == 0`: the wiki is already current. Nothing for you to do. Append a single `## [<date>] sync | no deltas` line to `log.md` (the `sync` action is allowed in SCHEMA §8 specifically for this case) and return.
 
 If `totals.total_changes > 10`: surface the count to the user before proceeding. They may want to scope down (`--summary-only` re-run, partial ingest, etc.). Don't silently process 50 files at once.
 
@@ -59,7 +59,18 @@ For 1–10 deltas: proceed to the per-category procedures below.
 
 For each entry in `deltas.new`:
 
-### 3.1 Read the source
+### 3.1 Capture the source's mtime first (SCHEMA Rule 1)
+
+The mtime is in the delta record itself — read it from the JSON before opening the source:
+
+```bash
+# Capture mtime from the delta record (NOT from the file system again)
+NEW_MTIME=$(jq -r ".deltas.new[] | select(.rel_path == \"<rel_path>\") | .mtime" .last-sync/<project>.json)
+```
+
+This implements SCHEMA Rule 1 — never invent or re-derive the mtime. The sync skill already captured it; reuse that.
+
+### 3.2 Read the source
 
 ```bash
 cat <wiki_dir>/raw/<project>/<rel_path>
@@ -67,7 +78,7 @@ cat <wiki_dir>/raw/<project>/<rel_path>
 
 You need the full content of the source — not a summary, not a fragment.
 
-### 3.2 Decide page-type implications
+### 3.3 Decide page-type implications
 
 A NEW source touches at minimum:
 
@@ -78,7 +89,7 @@ A NEW source touches at minimum:
 - The **`log.md`** ingest entry.
 - Possibly **`_candidates.md`** if new candidate concepts appeared.
 
-### 3.3 Write the source-summary
+### 3.4 Write the source-summary
 
 Create `wiki/<project>/sources/<mirror-path>.md` with:
 
@@ -115,7 +126,7 @@ The path under `sources/` should mirror the source's path under `raw/<project>/`
 | `raw/foo/docs/design.md` | `sources/docs/design.md` |
 | `raw/foo/docs/archive/old.md` | `sources/docs/archive/old.md` |
 
-### 3.4 Update / create entity and concept pages
+### 3.5 Update / create entity and concept pages
 
 For every entity or concept the source mentions:
 
@@ -123,7 +134,7 @@ For every entity or concept the source mentions:
 - If no page exists and this concept is mentioned in **3+** sources (across history, not just this ingest): promote from `_candidates.md` to a new `concepts/<slug>.md` page.
 - If no page exists and this is a first / second mention: add to `_candidates.md` with mention count.
 
-### 3.5 Update `current_state.md`
+### 3.6 Update `current_state.md`
 
 After processing all entity / concept changes, re-read `current_state.md` and update any sections that the new source materially affects. Typical updates:
 
@@ -181,7 +192,7 @@ Find every entity / concept page that cites this source (grep their `sources:` f
 
 ### 4.4 Update `current_state.md` if needed
 
-Same as §3.5 — flip statuses, refresh counters, record the supersession.
+Same as §3.6 — flip statuses, refresh counters, record the supersession.
 
 ---
 
