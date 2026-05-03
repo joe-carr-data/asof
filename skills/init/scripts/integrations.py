@@ -96,6 +96,12 @@ class IntegrationResult:
     snippet_skipped_already_present: bool
     hook_installed: bool
     hook_skipped_already_present: bool
+    #: Intended path of the settings file the user (or default) opted into.
+    #: Set whenever a settings update was attempted, regardless of success.
+    #: None only when the user opted out of both add_additional_directories
+    #: and install_hook (so no settings edit was attempted at all).
+    #: Round-3 review: previously this was None on failure, which made the
+    #: recovery hint show the wrong file for --commit-settings users.
     settings_path: Path | None
     additional_dir_added: bool
     additional_dir_already_present: bool
@@ -426,6 +432,12 @@ def apply_integrations(
         except (OSError, RuntimeError) as exc:
             errors.append(("hook install", _format_step_error(exc)))
 
+    # Compute the intended settings path BEFORE the update_settings call so
+    # the recovery hint can show the right file even when update_settings
+    # fails (e.g. the user passed --commit-settings → settings.json, but
+    # the JSON parse blew up). Round-3 review: previously a failed update
+    # left settings_path=None, and the recovery hint fell back to
+    # settings.local.json regardless of --commit-settings.
     settings_path: Path | None = None
     additional_added = False
     additional_already_present = False
@@ -433,9 +445,12 @@ def apply_integrations(
         request.choices.add_additional_directories
         or request.choices.install_hook
     ):
+        # Both _settings_path() here and update_settings()'s internal call
+        # use the same helper, so they're guaranteed to agree by construction.
+        settings_path = _settings_path(request)
         try:
-            settings_path, additional_added, additional_already_present = (
-                update_settings(request, dry_run=dry_run)
+            _, additional_added, additional_already_present = update_settings(
+                request, dry_run=dry_run
             )
         except (OSError, RuntimeError) as exc:
             errors.append(("settings update", _format_step_error(exc)))

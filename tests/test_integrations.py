@@ -559,6 +559,58 @@ def test_apply_integrations_settings_failure_does_not_abort_first_sync(
     assert result.first_sync_ran is True
 
 
+def test_settings_path_populated_on_failure_for_commit_settings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Round-3 review: when --commit-settings is set and update_settings
+    fails, IntegrationResult.settings_path must point at the COMMITTED
+    settings.json (not fall back to settings.local.json). Recovery hint
+    relies on this to tell the user the right file to fix.
+
+    Previously settings_path was only assigned on success, so on failure
+    the recovery hint would default to .claude/settings.local.json — wrong
+    for --commit-settings users."""
+    monkeypatch.setattr(
+        "integrations.subprocess.run",
+        lambda *_a, **_k: type("P", (), {"returncode": 0})(),
+    )
+    request = _build_request(tmp_path, commit_settings=True)
+    # Pre-create a malformed settings.json (the committed file).
+    settings_dir = request.project_root / ".claude"
+    settings_dir.mkdir(parents=True)
+    (settings_dir / "settings.json").write_text("{not json", encoding="utf-8")
+
+    result = apply_integrations(request, today=TODAY, dry_run=False)
+
+    assert result.has_errors is True
+    assert any(step == "settings update" for step, _ in result.errors)
+    # The intended path is recorded — and points at the COMMITTED file,
+    # not the local one.
+    assert result.settings_path is not None
+    assert result.settings_path.name == "settings.json"
+
+
+def test_settings_path_populated_on_failure_default_local(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Sanity-check the inverse: default mode (no --commit-settings) →
+    settings_path points at .local.json on failure too."""
+    monkeypatch.setattr(
+        "integrations.subprocess.run",
+        lambda *_a, **_k: type("P", (), {"returncode": 0})(),
+    )
+    request = _build_request(tmp_path)  # commit_settings=False (default)
+    settings_dir = request.project_root / ".claude"
+    settings_dir.mkdir(parents=True)
+    (settings_dir / "settings.local.json").write_text("{bad", encoding="utf-8")
+
+    result = apply_integrations(request, today=TODAY, dry_run=False)
+
+    assert result.has_errors is True
+    assert result.settings_path is not None
+    assert result.settings_path.name == "settings.local.json"
+
+
 def test_apply_integrations_snippet_failure_does_not_abort_hook(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

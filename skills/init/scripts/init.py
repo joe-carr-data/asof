@@ -336,7 +336,8 @@ def _print_integration_summary(result: IntegrationResult) -> None:
         print("  ✓ PostToolUse change-reminder hook installed")
     elif result.hook_skipped_already_present:
         print("  · hook skipped (already installed)")
-    if result.settings_path:
+    settings_failed = any(step == "settings update" for step, _ in result.errors)
+    if result.settings_path and not settings_failed:
         suffix = " (committed)" if result.settings_path.name == "settings.json" else ""
         print(f"  ✓ settings file updated: {result.settings_path}{suffix}")
         if result.additional_dir_added:
@@ -367,6 +368,12 @@ def _print_integration_summary(result: IntegrationResult) -> None:
             "wiki_change_reminder.py into <project>/.claude/hooks/"
             "asof_wiki_change_reminder.py (chmod 0755)"
         )
+        # settings_path is now populated whenever a settings update was
+        # attempted, regardless of whether it succeeded. The fallback
+        # placeholder fires only when the user opted out of both
+        # add_additional_directories and install_hook (so no settings
+        # edit was attempted at all — but if they're seeing this hint
+        # for "settings update", that path was attempted).
         print(
             "      • settings update — edit "
             f"{result.settings_path or '<project>/.claude/settings.local.json'} "
