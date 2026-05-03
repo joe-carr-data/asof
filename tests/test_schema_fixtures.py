@@ -152,6 +152,42 @@ INDEX_PAGE = textwrap.dedent(
     """
 )
 
+#: Overview page with explicit empty sources block (SCHEMA.md §3 — sources
+#: is optional for overview type; this fixture verifies parse_sources
+#: returns empty list rather than silently failing).
+OVERVIEW_EMPTY_SOURCES = textwrap.dedent(
+    """\
+    ---
+    title: demo — current state
+    type: overview
+    project: demo
+    sources: []
+    tags: [overview, snapshot]
+    last_updated: 2026-04-26
+    ---
+
+    # demo — current state
+
+    No sources ingested yet.
+    """
+)
+
+#: Frontmatter ending at EOF (no trailing newline after closing `---`).
+#: Some editors / scripts strip trailing newlines; the parser must still
+#: recognize the frontmatter. Codex round-1 phase-2 LOW.
+FRONTMATTER_AT_EOF = (
+    "---\n"
+    "title: Source — eof.md\n"
+    "type: source-summary\n"
+    "project: demo\n"
+    "sources:\n"
+    "  - path: raw/demo/eof.md\n"
+    "    source_mtime: 2026-04-26\n"
+    "    ingested: 2026-04-26\n"
+    "last_updated: 2026-04-26\n"
+    "---"  # NOTE: no trailing newline. Body absent.
+)
+
 
 # ─── extract_frontmatter ────────────────────────────────────────────────────
 
@@ -165,6 +201,8 @@ INDEX_PAGE = textwrap.dedent(
         ("quoted_path", QUOTED_PATH_SUMMARY),
         ("entity_multi_source", ENTITY_MULTI_SOURCE),
         ("index_page", INDEX_PAGE),
+        ("overview_empty_sources", OVERVIEW_EMPTY_SOURCES),
+        ("frontmatter_at_eof", FRONTMATTER_AT_EOF),
     ],
 )
 def test_extract_frontmatter_parses_every_canonical_fixture(
@@ -234,6 +272,28 @@ def test_parse_index_page_yields_no_sources() -> None:
     fm = extract_frontmatter(INDEX_PAGE)
     assert fm is not None
     assert parse_sources(fm) == []
+
+
+def test_parse_overview_with_explicit_empty_sources_list() -> None:
+    """SCHEMA.md §3: overview pages may include `sources: []` explicitly
+    (e.g. wiki_current_state.md template at bootstrap time before any
+    sources have been ingested). Parser must return an empty list, not
+    fail. Codex round-1 phase-2 fixture addition."""
+    fm = extract_frontmatter(OVERVIEW_EMPTY_SOURCES)
+    assert fm is not None
+    assert parse_sources(fm) == []
+
+
+def test_parse_frontmatter_at_eof() -> None:
+    """A page whose frontmatter closes at end-of-file (no trailing newline
+    after the closing `---`) must still parse. Old regex required a
+    trailing newline and silently misclassified such pages as "no
+    frontmatter", triggering false NEW/DELETED behavior. Codex round-1
+    phase-2 LOW fixture addition."""
+    fm = extract_frontmatter(FRONTMATTER_AT_EOF)
+    assert fm is not None
+    assert "title: Source — eof.md" in fm
+    assert parse_sources(fm) == [("raw/demo/eof.md", "2026-04-26")]
 
 
 # ─── build_source_index against on-disk fixtures ───────────────────────────

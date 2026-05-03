@@ -107,7 +107,12 @@ class StrictMtimeError(ValueError):
 # enough to parse with two regexes: one for the frontmatter fence, one for
 # the `sources:` block within it.
 
-_FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
+#: Frontmatter fence — accepts a closing `---` followed by either a
+#: newline OR end-of-file. Old form `---\s*\n` rejected pages whose
+#: frontmatter ended at EOF (no trailing newline), causing them to be
+#: silently misclassified as "no frontmatter" and triggering false
+#: NEW/DELETED behavior. Codex round-1 phase-2 LOW.
+_FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*(?:\n|$)", re.DOTALL)
 _SOURCES_BLOCK_RE = re.compile(
     r"^sources:\s*\n((?:[ \t]+.*\n?)+)", re.MULTILINE
 )

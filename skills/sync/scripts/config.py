@@ -47,9 +47,11 @@ PATTERN_C_DIRNAME: str = ".asof"
 DEFAULT_WIKI_DIR: Path = Path.home() / ".claude" / "asof"
 
 #: Default lint thresholds (overridable per-wiki via `lint_thresholds` block).
+#: SCHEMA.md §9/§10 documents these defaults — keep in sync.
 DEFAULT_LINT_THRESHOLDS: dict[str, int] = {
     "mtime_drift_days": 30,
     "supersession_gap_days": 60,
+    "candidate_promotion_threshold": 3,
 }
 
 
