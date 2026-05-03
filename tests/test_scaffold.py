@@ -363,6 +363,94 @@ def test_register_pattern_c_config_loadable(tmp_path: Path) -> None:
     assert cfg.projects[0].source == layout.wiki_dir.parent
 
 
+# ─── round-1 phase-3 HIGH 3: validate existing .asof.json before mutate ───
+
+
+def test_register_refuses_malformed_existing_config(tmp_path: Path) -> None:
+    """If `<wiki_dir>/.asof.json` is corrupt JSON, register raises a
+    ScaffoldError with a helpful pointer instead of silently overwriting
+    or producing a cryptic ConfigError.
+
+    Codex round-1 phase-3 HIGH 3: previous code used raw json.loads and
+    bypassed every invariant in load_wiki_config — a hand-edited config
+    with broken JSON would just blow up with json.JSONDecodeError mid-init."""
+    layout = _make_layout_a(tmp_path)
+    layout.wiki_dir.mkdir()
+    (layout.wiki_dir / ".asof.json").write_text(
+        "{not even json", encoding="utf-8"
+    )
+    with pytest.raises(ScaffoldError, match="invalid"):
+        register_project_in_config(layout, "myproject", dry_run=False)
+
+
+def test_register_refuses_existing_config_missing_version(tmp_path: Path) -> None:
+    """An existing config missing required version fields fails ConfigError
+    inside load_wiki_config — translated to a ScaffoldError so the init
+    user sees a coherent error path."""
+    layout = _make_layout_a(tmp_path)
+    layout.wiki_dir.mkdir()
+    (layout.wiki_dir / ".asof.json").write_text(
+        json.dumps(
+            {
+                "wiki_dir": str(layout.wiki_dir),
+                # schema_version intentionally missing
+                "projects": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ScaffoldError, match="invalid"):
+        register_project_in_config(layout, "myproject", dry_run=False)
+
+
+def test_register_preserves_forward_compat_keys(tmp_path: Path) -> None:
+    """Re-reading the raw dict (after load_wiki_config validation) preserves
+    keys WikiConfig doesn't model — important so unknown forward-compat
+    keys don't get silently stripped on second-project append."""
+    layout = _make_layout_a(tmp_path)
+    layout.wiki_dir.mkdir()
+    register_project_in_config(layout, "first", dry_run=False)
+    # Inject a hypothetical forward-compat key into the config
+    cfg_path = layout.wiki_dir / ".asof.json"
+    raw = json.loads(cfg_path.read_text(encoding="utf-8"))
+    raw["future_field"] = {"hello": "world"}
+    cfg_path.write_text(json.dumps(raw), encoding="utf-8")
+    # Second project append — must preserve future_field
+    register_project_in_config(layout, "second", dry_run=False)
+    final = json.loads(cfg_path.read_text(encoding="utf-8"))
+    assert final.get("future_field") == {"hello": "world"}
+    assert {p["name"] for p in final["projects"]} == {"first", "second"}
+
+
+# ─── round-1 phase-3 HIGH 4: Pattern C is single-project ──────────────────
+
+
+def test_register_pattern_c_refuses_second_project(tmp_path: Path) -> None:
+    """Pattern C wikis live at <repo>/.asof/ — one repo, one project. A
+    second project would silently change the layout's invariants and
+    produce a config that the sync skill assumes is single-project.
+
+    Codex round-1 phase-3 HIGH 4: PLAN.md §4 makes this explicit but
+    init wasn't enforcing it."""
+    layout = _make_layout_c(tmp_path)
+    layout.wiki_dir.mkdir()
+    register_project_in_config(layout, "myrepo", dry_run=False)
+    with pytest.raises(ScaffoldError, match="single-project"):
+        register_project_in_config(layout, "another-project", dry_run=False)
+
+
+def test_register_pattern_a_allows_multiple_projects(tmp_path: Path) -> None:
+    """Pattern A is the multi-project layout — second register must succeed.
+    Sanity check that the Pattern C single-project guard didn't bleed
+    into the Pattern A path."""
+    layout = _make_layout_a(tmp_path)
+    layout.wiki_dir.mkdir()
+    register_project_in_config(layout, "first", dry_run=False)
+    register_project_in_config(layout, "second", dry_run=False)
+    cfg = json.loads((layout.wiki_dir / ".asof.json").read_text())
+    assert {p["name"] for p in cfg["projects"]} == {"first", "second"}
+
+
 # ─── stage 4: scaffold_project_pages ───────────────────────────────────────
 
 

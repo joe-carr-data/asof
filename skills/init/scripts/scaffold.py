@@ -40,6 +40,7 @@ from _sync_bridge import (
     atomic_write_json,
     ensure_inside,
     extract_frontmatter,
+    load_wiki_config,
     slugify,
 )
 
@@ -329,11 +330,24 @@ def register_project_in_config(
 
     If the config doesn't exist, write a fresh one (Pattern A/B includes
     `wiki_dir`; Pattern C omits it so the committed config is portable).
-    If it exists, load it via `load_wiki_config` (which validates), then
-    append the new project. Refuses to add a project whose slug already
-    exists.
+    If it exists, validate it via `load_wiki_config()` (catches malformed
+    JSON, missing mandatory excludes, version-field corruption, etc.)
+    before mutating it. After validation:
+      - Pattern C: refuse if any project already exists. <repo>/.asof/
+        belongs to one project — adding a second one would silently
+        change the wiki layout's invariants. Round-1 phase-3 HIGH 4.
+      - Slug uniqueness: refuse if `project_slug` is already registered.
+
+    Round-1 phase-3 HIGH 3: previous code used raw `json.loads` which
+    bypassed every invariant in `load_wiki_config`. A wiki that had been
+    hand-edited into an invalid state would still get its `projects`
+    array appended, producing a second silent corruption.
 
     Returns: (config_path, created_new_file).
+
+    Raises:
+        ScaffoldError: existing config is malformed, Pattern C already
+                       has a project, or `project_slug` already exists.
     """
     config_path = layout.wiki_dir / CONFIG_FILENAME
     created_new = not config_path.exists()
@@ -341,14 +355,34 @@ def register_project_in_config(
     if created_new:
         cfg = _new_config_dict(layout)
     else:
-        cfg = json.loads(config_path.read_text(encoding="utf-8"))
-        existing_slugs = {p.get("name") for p in cfg.get("projects", [])}
+        try:
+            wiki_cfg = load_wiki_config(layout.wiki_dir)
+        except ConfigError as exc:
+            raise ScaffoldError(
+                f"asof:init: existing config at {config_path!s} is invalid: "
+                f"{exc}. Fix it by hand (or delete and re-run /asof:init) "
+                "before adding a new project."
+            ) from exc
+        if layout.pattern == "C" and wiki_cfg.projects:
+            existing = wiki_cfg.projects[0].name
+            raise ScaffoldError(
+                f"asof:init: Pattern C wiki at {config_path!s} already has "
+                f"project {existing!r}. Pattern C is single-project by "
+                "design (one repo = one .asof/ = one project). To register "
+                "a different project, use Pattern A or B; to re-bootstrap "
+                "this repo, delete .asof/ and re-run /asof:init."
+            )
+        existing_slugs = {p.name for p in wiki_cfg.projects}
         if project_slug in existing_slugs:
             raise ScaffoldError(
                 f"asof:init: project {project_slug!r} already exists in "
                 f"{config_path!s}. To add a different project, choose another "
                 f"name. To re-bootstrap, delete the entry manually."
             )
+        # Re-read raw dict so we preserve any forward-compat keys that
+        # WikiConfig doesn't model. load_wiki_config has already verified
+        # the JSON parses + structural invariants hold.
+        cfg = json.loads(config_path.read_text(encoding="utf-8"))
 
     cfg.setdefault("projects", []).append(
         _new_project_block(layout, project_slug)
