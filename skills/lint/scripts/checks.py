@@ -75,11 +75,20 @@ def _parse_iso_date(value: object) -> datetime.date | None:
 
 
 def _is_removed_upstream(page: ParsedPage) -> bool:
-    """True iff the page's frontmatter has `removed_upstream:` set —
-    the SCHEMA-defined marker that the source no longer exists in raw/.
-    Such pages are intentional historical record and exempt from
-    path-mismatch and missing-mtime checks."""
-    return "removed_upstream" in page.frontmatter
+    """True iff the page is a *valid* SCHEMA §6.5 historical record:
+    type=source-summary AND removed_upstream is a parseable ISO date.
+
+    Codex round-1 phase-4 HIGH: previous code treated mere key presence
+    as valid, so a page with `removed_upstream:` (no value) or with
+    `removed_upstream: nonsense` would silently bypass path-mismatch /
+    missing-mtime / mtime-drift / supersession-gap. The frontmatter
+    check now flags malformed removed_upstream as ERROR; this predicate
+    additionally requires a real ISO date so the skip is conservative.
+    """
+    if page.frontmatter.get("type") != SOURCE_SUMMARY_TYPE:
+        return False
+    value = page.frontmatter.get("removed_upstream")
+    return _parse_iso_date(value) is not None
 
 
 # ─── 1. frontmatter validity (ERROR) ───────────────────────────────────────
@@ -135,11 +144,95 @@ def check_frontmatter(
                     ),
                 )
             )
-        # Source-summary pages must have non-empty sources.
+        # Source-summary pages have an extra contract per SCHEMA §3:
+        # - exactly ONE source entry (the document the summary describes)
+        # - that entry must have path + source_mtime + ingested
+        # - source_mtime + ingested must be parseable ISO dates
+        # Codex round-1 phase-4 CRITICAL: previous code only verified the
+        # array was non-empty; pages with sources: [{source_mtime: ...}]
+        # could pass without path or ingested.
         if page.frontmatter.get("type") == SOURCE_SUMMARY_TYPE:
             sources = page.frontmatter.get("sources") or []
+            sources_line = line_of_field(page.raw_text, "sources") or 1
             if not isinstance(sources, list) or not sources:
-                line = line_of_field(page.raw_text, "sources") or 1
+                findings.append(
+                    Finding(
+                        severity=Severity.ERROR,
+                        check="frontmatter",
+                        page=page.relative_path,
+                        line=sources_line,
+                        message=(
+                            "source-summary page has no `sources` entries "
+                            "(must cite exactly one raw document)"
+                        ),
+                    )
+                )
+            elif len(sources) != 1:
+                findings.append(
+                    Finding(
+                        severity=Severity.ERROR,
+                        check="frontmatter",
+                        page=page.relative_path,
+                        line=sources_line,
+                        message=(
+                            f"source-summary page cites {len(sources)} sources "
+                            "(must cite exactly one — split into separate pages)"
+                        ),
+                    )
+                )
+            else:
+                entry = sources[0]
+                if not isinstance(entry, dict):
+                    findings.append(
+                        Finding(
+                            severity=Severity.ERROR,
+                            check="frontmatter",
+                            page=page.relative_path,
+                            line=sources_line,
+                            message="sources[0] is not a mapping",
+                        )
+                    )
+                else:
+                    for required_key in ("path", "source_mtime", "ingested"):
+                        if not entry.get(required_key):
+                            findings.append(
+                                Finding(
+                                    severity=Severity.ERROR,
+                                    check="frontmatter",
+                                    page=page.relative_path,
+                                    line=sources_line,
+                                    message=(
+                                        f"sources[0] is missing required field "
+                                        f"{required_key!r}"
+                                    ),
+                                )
+                            )
+                    # Validate ingested ISO date (source_mtime is checked
+                    # separately by check_missing_mtime; checking it again
+                    # here would produce duplicate findings).
+                    ingested = entry.get("ingested")
+                    if ingested and _parse_iso_date(ingested) is None:
+                        findings.append(
+                            Finding(
+                                severity=Severity.ERROR,
+                                check="frontmatter",
+                                page=page.relative_path,
+                                line=sources_line,
+                                message=(
+                                    f"sources[0].ingested {ingested!r} is not a "
+                                    "valid ISO date (expected YYYY-MM-DD)"
+                                ),
+                            )
+                        )
+
+        # `removed_upstream:`, when present, must be a parseable ISO date.
+        # Codex round-1 phase-4 HIGH: previous code treated mere key
+        # presence as valid, suppressing path-mismatch + missing-mtime +
+        # mtime-drift + supersession-gap checks.
+        if "removed_upstream" in page.frontmatter:
+            value = page.frontmatter.get("removed_upstream")
+            if not value or _parse_iso_date(value) is None:
+                line = line_of_field(page.raw_text, "removed_upstream") or 1
                 findings.append(
                     Finding(
                         severity=Severity.ERROR,
@@ -147,8 +240,22 @@ def check_frontmatter(
                         page=page.relative_path,
                         line=line,
                         message=(
-                            "source-summary page has no `sources` entries "
-                            "(must cite at least one raw document)"
+                            f"removed_upstream {value!r} is not a valid ISO "
+                            "date (expected YYYY-MM-DD)"
+                        ),
+                    )
+                )
+            elif page.frontmatter.get("type") != SOURCE_SUMMARY_TYPE:
+                line = line_of_field(page.raw_text, "removed_upstream") or 1
+                findings.append(
+                    Finding(
+                        severity=Severity.ERROR,
+                        check="frontmatter",
+                        page=page.relative_path,
+                        line=line,
+                        message=(
+                            "removed_upstream is only valid on source-summary "
+                            "pages (per SCHEMA §6.5)"
                         ),
                     )
                 )
@@ -165,9 +272,17 @@ def check_path_mismatch(
 
     Skips pages with `removed_upstream:` set — those are SCHEMA-sanctioned
     historical record. Path is interpreted as relative to `wiki_dir`
-    (matching the SCHEMA convention `path: raw/<project>/foo.md`).
+    (matching the SCHEMA convention `path: raw/<project>/foo.md`) and is
+    constrained to live under the project's raw_subdir.
+
+    Codex round-1 phase-4 HIGH: previous code joined raw_rel to wiki_dir
+    without containment-checking, so an absolute or `../`-traversing path
+    (`/etc/passwd`, `../../../etc/hosts`) could pass `is_file()` if the
+    target existed. Now: reject absolute paths, resolve, require the
+    result to be inside `ctx.raw_project_dir`, then check existence.
     """
     findings: list[Finding] = []
+    raw_root = ctx.raw_project_dir.resolve()
     for page in pages:
         if _is_removed_upstream(page):
             continue
@@ -181,9 +296,53 @@ def check_path_mismatch(
             raw_rel = entry.get("path")
             if not isinstance(raw_rel, str) or not raw_rel:
                 continue
-            # `path:` is wiki-dir-relative per SCHEMA (e.g. raw/myproj/foo.md).
-            absolute = ctx.wiki_dir / raw_rel
-            if not absolute.is_file():
+            # Reject absolute paths (SCHEMA §3 says path: is relative to
+            # wiki_dir). An absolute path is always a contract violation.
+            if Path(raw_rel).is_absolute():
+                findings.append(
+                    Finding(
+                        severity=Severity.ERROR,
+                        check="path-mismatch",
+                        page=page.relative_path,
+                        line=line,
+                        message=(
+                            f"sources[].path {raw_rel!r} is absolute (must be "
+                            "relative to wiki_dir per SCHEMA §3)"
+                        ),
+                    )
+                )
+                continue
+            # Resolve and containment-check inside the project's raw_subdir.
+            try:
+                resolved = (ctx.wiki_dir / raw_rel).resolve()
+            except (OSError, ValueError):
+                findings.append(
+                    Finding(
+                        severity=Severity.ERROR,
+                        check="path-mismatch",
+                        page=page.relative_path,
+                        line=line,
+                        message=f"sources[].path {raw_rel!r} cannot be resolved",
+                    )
+                )
+                continue
+            try:
+                resolved.relative_to(raw_root)
+            except ValueError:
+                findings.append(
+                    Finding(
+                        severity=Severity.ERROR,
+                        check="path-mismatch",
+                        page=page.relative_path,
+                        line=line,
+                        message=(
+                            f"sources[].path {raw_rel!r} escapes the project's "
+                            f"raw_subdir ({raw_root!s}) — path-traversal refused"
+                        ),
+                    )
+                )
+                continue
+            if not resolved.is_file():
                 findings.append(
                     Finding(
                         severity=Severity.ERROR,

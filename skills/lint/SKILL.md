@@ -131,7 +131,7 @@ Summary: 3 errors, 2 warnings, 1 info across 47 pages.
 # Lint a specific project
 /asof:lint myproject
 
-# CI mode: JSON output, only WARN+ severity
+# CI mode: JSON output, only WARN+ severity (RECOMMENDED for CI gates)
 /asof:lint --json --severity warn
 
 # Apply the narrow auto-fixes (insert missing last_updated, link orphans into index.md)
@@ -142,6 +142,15 @@ Summary: 3 errors, 2 warnings, 1 info across 47 pages.
 
 # Override wiki dir (Pattern A users running from outside cwd-resolution)
 /asof:lint --wiki-dir ~/.claude/asof
+```
+
+## CI integration note
+
+The default severity threshold is `info`, which means **orphan-page findings cause exit 1**. For CI gating, prefer `--severity warn` so that orphan pages don't block merges; the agent can still address them out-of-band. Pin the threshold explicitly so a future addition of a new INFO-severity check doesn't silently fail pipelines:
+
+```bash
+asof:lint --severity warn   # exit 1 only on ERROR or WARN
+asof:lint --severity error  # exit 1 only on ERROR (most permissive gate)
 ```
 
 ## Cross-references

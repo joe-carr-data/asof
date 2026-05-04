@@ -131,6 +131,94 @@ def test_frontmatter_source_summary_empty_sources(tmp_path: Path) -> None:
     assert any("no `sources` entries" in f.message for f in findings)
 
 
+def test_frontmatter_source_summary_must_cite_exactly_one_source(
+    tmp_path: Path,
+) -> None:
+    """Codex round-1 phase-4 CRITICAL: source-summary pages must cite
+    exactly one raw document (SCHEMA §3 line 113). Two sources → ERROR."""
+    page = _make_page(
+        tmp_path,
+        "sources/x.md",
+        "---\ntitle: T\ntype: source-summary\nproject: p\nlast_updated: 2026-04-26\n"
+        "sources:\n"
+        "  - path: raw/myproj/a.md\n    source_mtime: 2026-04-22\n    ingested: 2026-04-22\n"
+        "  - path: raw/myproj/b.md\n    source_mtime: 2026-04-23\n    ingested: 2026-04-23\n"
+        "---\n",
+    )
+    findings = check_frontmatter([page], _make_ctx(tmp_path))
+    assert any("cites 2 sources" in f.message for f in findings)
+
+
+def test_frontmatter_source_summary_requires_path(tmp_path: Path) -> None:
+    """Codex round-1 phase-4 CRITICAL: sources[0] must have `path`."""
+    page = _make_page(
+        tmp_path,
+        "sources/x.md",
+        "---\ntitle: T\ntype: source-summary\nproject: p\nlast_updated: 2026-04-26\n"
+        "sources:\n  - source_mtime: 2026-04-22\n    ingested: 2026-04-22\n---\n",
+    )
+    findings = check_frontmatter([page], _make_ctx(tmp_path))
+    assert any("missing required field 'path'" in f.message for f in findings)
+
+
+def test_frontmatter_source_summary_requires_ingested(tmp_path: Path) -> None:
+    """Codex round-1 phase-4 CRITICAL: sources[0] must have `ingested`."""
+    page = _make_page(
+        tmp_path,
+        "sources/x.md",
+        "---\ntitle: T\ntype: source-summary\nproject: p\nlast_updated: 2026-04-26\n"
+        "sources:\n  - path: raw/myproj/foo.md\n    source_mtime: 2026-04-22\n---\n",
+    )
+    findings = check_frontmatter([page], _make_ctx(tmp_path))
+    assert any("missing required field 'ingested'" in f.message for f in findings)
+
+
+def test_frontmatter_source_summary_invalid_ingested_iso(tmp_path: Path) -> None:
+    """sources[0].ingested must be parseable ISO date."""
+    page = _make_page(
+        tmp_path,
+        "sources/x.md",
+        "---\ntitle: T\ntype: source-summary\nproject: p\nlast_updated: 2026-04-26\n"
+        "sources:\n  - path: raw/myproj/foo.md\n    source_mtime: 2026-04-22\n"
+        "    ingested: not-a-date\n---\n",
+    )
+    findings = check_frontmatter([page], _make_ctx(tmp_path))
+    assert any("ingested" in f.message and "not a valid ISO date" in f.message
+               for f in findings)
+
+
+def test_frontmatter_removed_upstream_must_be_iso_date(tmp_path: Path) -> None:
+    """Codex round-1 phase-4 HIGH: empty / unparseable removed_upstream
+    is now an ERROR (previously silently bypassed downstream checks)."""
+    page = _make_page(
+        tmp_path,
+        "sources/x.md",
+        "---\ntitle: T\ntype: source-summary\nproject: p\nlast_updated: 2026-04-26\n"
+        "removed_upstream: not-a-date\n"
+        "sources:\n  - path: raw/myproj/foo.md\n    source_mtime: 2026-04-22\n"
+        "    ingested: 2026-04-22\n---\n",
+    )
+    findings = check_frontmatter([page], _make_ctx(tmp_path))
+    assert any("removed_upstream" in f.message and "not a valid ISO date" in f.message
+               for f in findings)
+
+
+def test_frontmatter_removed_upstream_only_on_source_summary(
+    tmp_path: Path,
+) -> None:
+    """Codex round-1 phase-4 HIGH: removed_upstream is only valid on
+    source-summary pages per SCHEMA §6.5. An entity page with
+    `removed_upstream:` set produces a frontmatter ERROR."""
+    page = _make_page(
+        tmp_path,
+        "x.md",
+        "---\ntitle: T\ntype: entity\nproject: p\nlast_updated: 2026-04-26\n"
+        "removed_upstream: 2026-04-29\n---\n",
+    )
+    findings = check_frontmatter([page], _make_ctx(tmp_path))
+    assert any("only valid on source-summary" in f.message for f in findings)
+
+
 # ─── 2. path mismatch ──────────────────────────────────────────────────────
 
 
@@ -172,6 +260,40 @@ def test_path_mismatch_skips_removed_upstream(tmp_path: Path) -> None:
     )
     findings = check_path_mismatch([page], _make_ctx(tmp_path))
     assert findings == []
+
+
+def test_path_mismatch_rejects_absolute_path(tmp_path: Path) -> None:
+    """Codex round-1 phase-4 HIGH: absolute paths must be rejected as a
+    SCHEMA §3 contract violation, even if the absolute path exists."""
+    # Create a file at an absolute location that exists.
+    elsewhere = tmp_path / "elsewhere" / "foo.md"
+    elsewhere.parent.mkdir()
+    elsewhere.write_text("real file")
+    page = _make_page(
+        tmp_path,
+        "sources/foo.md",
+        f"---\ntitle: T\ntype: source-summary\nproject: p\nlast_updated: 2026-04-26\n"
+        f"sources:\n  - path: {elsewhere!s}\n    source_mtime: 2026-04-22\n---\n",
+    )
+    findings = check_path_mismatch([page], _make_ctx(tmp_path))
+    assert any("is absolute" in f.message for f in findings)
+
+
+def test_path_mismatch_rejects_path_traversal(tmp_path: Path) -> None:
+    """Codex round-1 phase-4 HIGH: `../` paths that escape raw_project_dir
+    are rejected even when the resolved target exists."""
+    # File one level above raw_project_dir that the traversal could "find".
+    above = tmp_path / "above.md"
+    above.write_text("attacker-controlled")
+    page = _make_page(
+        tmp_path,
+        "sources/foo.md",
+        "---\ntitle: T\ntype: source-summary\nproject: p\nlast_updated: 2026-04-26\n"
+        "sources:\n  - path: raw/myproj/../../above.md\n    source_mtime: 2026-04-22\n---\n",
+    )
+    findings = check_path_mismatch([page], _make_ctx(tmp_path))
+    assert any("escapes" in f.message and "path-traversal" in f.message
+               for f in findings)
 
 
 # ─── 3. missing mtime ──────────────────────────────────────────────────────
@@ -279,6 +401,25 @@ def test_mtime_drift_over_threshold_fires(tmp_path: Path) -> None:
 
 
 def test_mtime_drift_skips_removed_upstream(tmp_path: Path) -> None:
+    """removed_upstream skip requires type=source-summary AND parseable
+    ISO date (Codex round-1 phase-4 HIGH). With both → skipped."""
+    page = _make_page(
+        tmp_path,
+        "x.md",
+        "---\ntitle: T\ntype: source-summary\nproject: p\nlast_updated: 2026-01-01\n"
+        "removed_upstream: 2026-04-29\n"
+        "sources:\n  - path: raw/myproj/foo.md\n    source_mtime: 2026-05-04\n---\n",
+    )
+    findings = check_mtime_drift([page], _make_ctx(tmp_path))
+    assert findings == []
+
+
+def test_mtime_drift_does_not_skip_when_removed_upstream_invalid(
+    tmp_path: Path,
+) -> None:
+    """An entity page with removed_upstream is NOT exempt — that key is
+    only valid on source-summary pages per SCHEMA §6.5. Codex round-1
+    phase-4 HIGH: previous code accepted mere key presence."""
     page = _make_page(
         tmp_path,
         "x.md",
@@ -287,7 +428,26 @@ def test_mtime_drift_skips_removed_upstream(tmp_path: Path) -> None:
         "sources:\n  - path: raw/myproj/foo.md\n    source_mtime: 2026-05-04\n---\n",
     )
     findings = check_mtime_drift([page], _make_ctx(tmp_path))
-    assert findings == []
+    # Entity page with removed_upstream is not skipped; mtime-drift fires.
+    assert any(f.check == "mtime-drift" for f in findings)
+
+
+def test_mtime_drift_does_not_skip_when_removed_upstream_malformed(
+    tmp_path: Path,
+) -> None:
+    """source-summary with malformed `removed_upstream:` (no value or
+    unparseable) is NOT exempt — _is_removed_upstream now requires a
+    parseable ISO date."""
+    page = _make_page(
+        tmp_path,
+        "x.md",
+        "---\ntitle: T\ntype: source-summary\nproject: p\nlast_updated: 2026-01-01\n"
+        "removed_upstream: not-a-date\n"
+        "sources:\n  - path: raw/myproj/foo.md\n    source_mtime: 2026-05-04\n"
+        "    ingested: 2026-05-04\n---\n",
+    )
+    findings = check_mtime_drift([page], _make_ctx(tmp_path))
+    assert any(f.check == "mtime-drift" for f in findings)
 
 
 # ─── 6. supersession gap ───────────────────────────────────────────────────

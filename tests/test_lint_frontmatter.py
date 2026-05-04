@@ -165,3 +165,46 @@ def test_line_of_field_returns_none_for_missing_field() -> None:
 
 def test_line_of_field_returns_none_for_no_frontmatter() -> None:
     assert line_of_field("# just a body\n", "title") is None
+
+
+def test_inline_list_quote_aware_comma_split() -> None:
+    """Codex round-1 phase-4 MEDIUM: commas inside quoted strings must NOT
+    split the inline list. `["foo, bar", baz]` → ["foo, bar", "baz"]."""
+    text = '---\naliases: ["foo, bar", baz, "qux, corge"]\n---\n'
+    fm, _, _ = parse_page(text)
+    assert fm["aliases"] == ["foo, bar", "baz", "qux, corge"]
+
+
+def test_inline_list_single_quoted_with_comma() -> None:
+    text = "---\ntags: ['has, comma', plain]\n---\n"
+    fm, _, _ = parse_page(text)
+    assert fm["tags"] == ["has, comma", "plain"]
+
+
+def test_scalar_list_requires_space_after_dash() -> None:
+    """Codex round-1 phase-4 MEDIUM: `-foo` (no space) is NOT a valid
+    list item — only `- foo`. Strict to avoid silently swallowing
+    malformed YAML-shape frontmatter."""
+    text = (
+        "---\n"
+        "previous_mtimes:\n"
+        "  -2026-03-10\n"   # no space after dash → dropped
+        "  - 2026-04-12\n"  # valid
+        "  -2026-05-01\n"   # no space → dropped
+        "---\n"
+    )
+    fm, _, _ = parse_page(text)
+    assert fm["previous_mtimes"] == ["2026-04-12"]
+
+
+def test_scalar_list_bare_dash_yields_empty_string() -> None:
+    """A bare `-` (YAML's empty/null list item) is preserved as empty string."""
+    text = (
+        "---\n"
+        "previous_mtimes:\n"
+        "  -\n"
+        "  - 2026-04-12\n"
+        "---\n"
+    )
+    fm, _, _ = parse_page(text)
+    assert fm["previous_mtimes"] == ["", "2026-04-12"]

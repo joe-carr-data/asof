@@ -30,6 +30,7 @@ from _lint_bridge import (
     check_version_compat,
     file_lock,
     load_wiki_config,
+    resolve_wiki_dir,
 )
 from checks import ProjectContext, run_all_checks
 from fix import FixResult, apply_fixes
@@ -107,34 +108,18 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 # ─── wiki-dir resolution ──────────────────────────────────────────────────
-
-
-def _resolve_wiki_dir(explicit: str | None) -> Path:
-    """Pick the wiki dir to lint.
-
-    Order: --wiki-dir flag → cwd's enclosing .asof/ (Pattern C) → default
-    Pattern A path (~/.claude/asof/). On unresolvable, raises FileNotFoundError.
-    """
-    if explicit:
-        return Path(explicit).expanduser().resolve()
-    cwd = Path.cwd().resolve()
-    # Pattern C: walk up looking for an `.asof` directory with a `.asof.json`.
-    cur = cwd
-    while True:
-        candidate = cur / ".asof"
-        if (candidate / ".asof.json").is_file():
-            return candidate.resolve()
-        if cur.parent == cur:
-            break
-        cur = cur.parent
-    # Pattern A default.
-    default = (Path.home() / ".claude" / "asof").resolve()
-    if (default / ".asof.json").is_file():
-        return default
-    raise FileNotFoundError(
-        "asof:lint: cannot resolve wiki dir. Pass --wiki-dir <path>, or run "
-        "from inside a Pattern C repo, or ensure ~/.claude/asof/.asof.json exists."
-    )
+# Codex round-1 phase-4 LATENT: lint now uses sync's resolve_wiki_dir
+# directly (via _lint_bridge) instead of reimplementing it. Sync's resolver
+# supports ASOF_DIR env var + bare-config walk-up; lint must agree on which
+# wiki it's looking at, otherwise users see "sync works, lint can't find
+# the wiki" in env-driven setups.
+#
+# Behavior difference vs old local resolver: sync's resolver returns
+# DEFAULT_WIKI_DIR even when no .asof.json exists there. The caller's
+# subsequent load_wiki_config() will surface the "no asof config" error,
+# which is the same error path users hit on a missing wiki dir. Net
+# effect for lint: the FileNotFoundError on the non-existent default
+# now becomes a load_wiki_config FileNotFoundError with the same exit 4.
 
 
 # ─── page collection ──────────────────────────────────────────────────────
@@ -207,11 +192,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     # --- 1. Resolve wiki dir + load config (pre-flight gate) -----------------
-    try:
-        wiki_dir = _resolve_wiki_dir(args.wiki_dir)
-    except FileNotFoundError as exc:
-        print(str(exc), file=sys.stderr)
-        return ExitCode.PRECONDITION
+    # Use sync's resolver so ASOF_DIR / walk-up behavior matches across skills.
+    wiki_dir = resolve_wiki_dir(args.wiki_dir)
 
     try:
         wiki_cfg = load_wiki_config(wiki_dir)
@@ -253,25 +235,31 @@ def main(argv: list[str] | None = None) -> int:
     if isinstance(selected_projects, int):
         return selected_projects  # exit code from helper
 
-    # --- 4. Acquire lock + iterate projects ---------------------------------
+    # --- 4. Acquire lock for the duration of report + fix --------------------
+    # Codex round-1 phase-4 CRITICAL: --fix MUST run under the same exclusive
+    # lock as the report; otherwise a concurrent sync (or another lint --fix)
+    # could change the corpus between collecting findings and applying fixes,
+    # so the patch lands against state we never saw.
     severity_filter = Severity.from_string(args.severity)
     today = datetime.date.today()
     lock_path = wiki_cfg.wiki_dir / ".asof.lock"
+    fix_result: FixResult | None = None
     try:
         with file_lock(lock_path):
             project_reports = _lint_projects(
                 selected_projects, wiki_cfg, today
             )
+            if args.fix:
+                fix_result = _apply_lint_fixes(
+                    project_reports,
+                    selected_projects,
+                    wiki_cfg,
+                    today,
+                    dry_run=args.dry_run,
+                )
     except (OSError, RuntimeError) as exc:
         print(f"asof:lint: lock acquisition failed: {exc}", file=sys.stderr)
         return ExitCode.INTERNAL_ERROR
-
-    # --- 5. Optional --fix --------------------------------------------------
-    fix_result: FixResult | None = None
-    if args.fix:
-        fix_result = _apply_lint_fixes(
-            project_reports, selected_projects, wiki_cfg, today, dry_run=args.dry_run
-        )
 
     # --- 6. Render -----------------------------------------------------------
     report = LintReport(

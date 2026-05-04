@@ -45,7 +45,11 @@ from config import (  # type: ignore[import-not-found]
     load_wiki_config,
 )
 from delta import extract_frontmatter, parse_sources  # type: ignore[import-not-found]
-from resolution import CompatStatus, check_version_compat  # type: ignore[import-not-found]
+from resolution import (  # type: ignore[import-not-found]
+    CompatStatus,
+    check_version_compat,
+    resolve_wiki_dir,
+)
 from utils import (  # type: ignore[import-not-found]
     SKILL_VERSION,
     atomic_write_text,
@@ -81,4 +85,5 @@ __all__ = [
     # resolution
     "CompatStatus",
     "check_version_compat",
+    "resolve_wiki_dir",
 ]

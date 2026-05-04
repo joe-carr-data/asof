@@ -90,12 +90,17 @@ def test_invalid_config_returns_precondition(
 def test_unresolvable_wiki_dir_returns_precondition(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """No wiki anywhere in cwd walk-up + no default → exit 4. Codex round-1
+    phase-4 LATENT: lint now uses sync's resolver, which returns
+    DEFAULT_WIKI_DIR unconditionally; load_wiki_config then raises
+    FileNotFoundError ("no asof config at ..."), still mapping to exit 4."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(Path, "home", lambda: tmp_path / "fake-home")
+    monkeypatch.delenv("ASOF_DIR", raising=False)
     rc = main([])
     assert rc == ExitCode.PRECONDITION
     err = capsys.readouterr().err
-    assert "cannot resolve wiki dir" in err
+    assert "no asof config" in err
 
 
 def test_unknown_project_returns_precondition(

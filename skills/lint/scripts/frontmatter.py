@@ -144,15 +144,45 @@ def _collect_block(lines: list[str], start: int) -> tuple[list[str], int]:
 
 
 def _parse_inline_value(value: str) -> Any:
-    """Parse a single inline value: inline list, quoted string, or scalar."""
-    # Inline list: [a, b, c]
+    """Parse a single inline value: inline list, quoted string, or scalar.
+
+    Inline lists use a quote-aware comma splitter so values like
+        aliases: ["foo, bar", baz]
+    parse as ["foo, bar", "baz"] and not ["foo", "bar", "baz"]
+    (Codex round-1 phase-4 MEDIUM).
+    """
     list_m = _INLINE_LIST.match(value)
     if list_m:
         body = list_m.group(1)
         if not body.strip():
             return []
-        return [_strip_quotes(item.strip()) for item in body.split(",")]
+        return [_strip_quotes(item.strip()) for item in _split_inline_list(body)]
     return _strip_quotes(value)
+
+
+def _split_inline_list(body: str) -> list[str]:
+    """Quote-aware comma split. Tracks single + double quote state so commas
+    inside quoted strings are NOT separators. Mismatched quotes fall back
+    to naive split (the upstream finding will surface the malformed shape)."""
+    parts: list[str] = []
+    cur: list[str] = []
+    in_single = False
+    in_double = False
+    for ch in body:
+        if ch == "'" and not in_double:
+            in_single = not in_single
+            cur.append(ch)
+        elif ch == '"' and not in_single:
+            in_double = not in_double
+            cur.append(ch)
+        elif ch == "," and not in_single and not in_double:
+            parts.append("".join(cur))
+            cur = []
+        else:
+            cur.append(ch)
+    if cur:
+        parts.append("".join(cur))
+    return parts
 
 
 def _strip_quotes(value: str) -> str:
@@ -167,14 +197,24 @@ def _parse_scalar_list_block(block_lines: list[str]) -> list[str]:
         - 2026-03-10
         - 2026-04-12
     into ["2026-03-10", "2026-04-12"].
+
+    Codex round-1 phase-4 MEDIUM: requires a SPACE after the dash, so
+    `-foo` (without space) is NOT treated as a list item. YAML requires
+    `- foo` syntax; accepting `-foo` was silently swallowing malformed
+    frontmatter. Pure scalar values like `- 2026-03-10` and the bare
+    `-` (empty list item, allowed by YAML for null) are still accepted.
     """
     out: list[str] = []
     for line in block_lines:
         stripped = line.strip()
-        if stripped.startswith("- "):
+        if stripped == "-":
+            # Bare `-` → empty/null list item (rare but valid YAML).
+            out.append("")
+        elif stripped.startswith("- "):
             out.append(_strip_quotes(stripped[2:].strip()))
-        elif stripped.startswith("-"):
-            out.append(_strip_quotes(stripped[1:].strip()))
+        # Anything else (`-foo`, `*foo`, plain text) is silently dropped.
+        # The lint frontmatter check will surface "missing field" if a
+        # required block ends up empty as a result.
     return out
 
 
