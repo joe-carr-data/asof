@@ -10,7 +10,7 @@ In any Claude Code session:
 
 ```
 /plugin marketplace add joe-carr-data/asof
-/plugin install asof@joe-carr-data
+/plugin install asof@asof
 ```
 
 That's it. The plugin auto-discovers from `.claude-plugin/plugin.json` at the repo root — no separate marketplace registration needed. Skills land namespaced under `asof:`, so:

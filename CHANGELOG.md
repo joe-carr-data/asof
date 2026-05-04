@@ -82,7 +82,7 @@ First stable release. Three skills (`init`, `sync`, `lint`), a PostToolUse chang
 
 - Plugin manifest at `.claude-plugin/plugin.json`.
 - Stdlib-only runtime (no `pip install`, no `npm i`, no `uv sync`); requires Python 3.9+ and `rsync`.
-- Install: `/plugin marketplace add joe-carr-data/asof` then `/plugin install asof@joe-carr-data` in any Claude Code session.
+- Install: `/plugin marketplace add joe-carr-data/asof` then `/plugin install asof@asof` in any Claude Code session.
 
 ## [0.1.0-dev] — pre-release
 
