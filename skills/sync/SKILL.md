@@ -2,7 +2,7 @@
 name: sync
 description: Sync source repo .md files into the wiki's raw/ dir and detect what changed (NEW / MODIFIED / DELETED). Use when the user says "sync the wiki", "asof sync", "update the wiki", "ingest new docs", "refresh the wiki from <project>", "pull updates into the brain", or when source markdown has changed and the wiki may be stale.
 when_to_use: Trigger phrases — "sync the wiki", "asof sync", "update the wiki", "refresh the wiki", "ingest new docs", "bring the wiki up to date", "pull updates from <project> into the brain", "what changed in the docs". Also fire when a recent .md edit suggests the wiki is now out-of-date.
-allowed-tools: Bash(rsync *) Bash(stat *) Bash(find *) Bash(python3 *) Bash(grep *) Bash(diff *) Bash(ls *) Bash(cat *) Bash(jq *) Bash(test *) Read Write Edit
+allowed-tools: Bash(rsync *) Bash(stat *) Bash(find *) Bash(python3 *) Bash(grep *) Bash(diff *) Bash(ls *) Bash(cat *) Bash(jq *) Bash(test *) Read Write Edit AskUserQuestion
 argument-hint: "[project-name (optional)] [--all] [--dry-run] [--summary-only] [--strict-mtime] [--non-interactive] [--auto-select-longest] [--copy-links] [--allow-self]"
 ---
 
@@ -19,6 +19,24 @@ python3 ${CLAUDE_SKILL_DIR}/scripts/sync.py $ARGUMENTS
 ```
 
 `$ARGUMENTS` may be empty (cwd-aware project auto-select), a project name, or any of the documented flags. The script handles wiki-dir resolution, version-compat checks, project selection, file locking, rsync invocation, delta detection, and report rendering.
+
+### After sync reports deltas: the ingest UX
+
+This skill prints a NEW / MODIFIED / DELETED report — but **the agent owns the wiki ingest**, not the script. After sync exits, you (the agent) walk the deltas and write source-summaries, update bookkeeping pages, etc. The UX for this varies wildly with delta count, so:
+
+**Do NOT free-form-ask the user via prose** ("Want me to ingest now?"). Use Claude Code's `AskUserQuestion` tool to present a structured, click-to-select interface. Match the question to the delta scale:
+
+- **0 deltas** — nothing to do; print "wiki is up to date" and exit.
+- **1 delta** — just ingest it (single file, no confirmation needed).
+- **2–5 deltas** — one AskUserQuestion: `Process all N now (Recommended)` / `Preview diff first, then I'll confirm` / `Skip ingest — I'll handle it later`.
+- **6–20 deltas** — one AskUserQuestion: `Process all N now (Recommended)` / `Pause every 10 files for confirmation` / `Preview the first 3, then continue` / `Skip ingest`.
+- **20+ deltas** — one AskUserQuestion: `Process all N now` / `Pause every 25 files (Recommended)` / `Batch by source subdirectory` / `One at a time — I want to read each` / `Skip ingest`.
+
+**Why structured matters:** for large ingests the user is delegating a long autonomous run. They need to see "Recommended" tags up front, not scroll through prose to figure out what you're proposing. Structured questions also let them click "Recommended" in one keystroke instead of typing `yes` 50 times.
+
+**During the ingest itself:** if you opted into "Pause every N", actually pause — invoke `AskUserQuestion` again at each checkpoint (`Continue with the next batch (Recommended)` / `Stop here, I'll review what's done so far` / `Switch to one-at-a-time mode`). Don't pretend to pause and then keep going — that defeats the user's choice.
+
+**For DELETED deltas specifically:** these are SCHEMA §6.5 "removed_upstream" cases. Mark the existing source-summary with `removed_upstream: <today>` rather than deleting the page. One AskUserQuestion if there are 3+ deletions: `Mark all N as removed_upstream (Recommended)` / `Review each one — some may have been moved, not deleted` / `Skip`.
 
 ## What the script does, in order
 
