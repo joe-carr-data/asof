@@ -365,9 +365,17 @@ def test_ask_integrations_all_defaults_in_non_interactive(tmp_path: Path) -> Non
     )
 
 
-def test_ask_integrations_pattern_c_skips_additional_directories(
+def test_ask_integrations_pattern_c_defaults_add_additional_directories_true(
     tmp_path: Path,
 ) -> None:
+    """Codex round-2 phase-8 BLOCKING fix: Pattern C must opt INTO the
+    'register wiki with Claude Code' integration by default, because
+    that choice now also gates the permissions.allow rules — Pattern C
+    needs those to skip per-file ingest prompts even though it doesn't
+    need additionalDirectories. update_settings handles the Pattern C
+    case internally (no additionalDirectories write, but allow rules
+    fire). Previously the wizard hardcoded False here, which left
+    Pattern C users with no permission rules → 250-prompt UX wart."""
     layout = _make_layout(tmp_path, "C")
     result = ask_integrations(
         layout=layout,
@@ -379,11 +387,30 @@ def test_ask_integrations_pattern_c_skips_additional_directories(
         args_non_interactive=True,
         env={},
     )
-    assert result.add_additional_directories is False
+    assert result.add_additional_directories is True
     # Other defaults still True
     assert result.install_claudemd_snippet is True
     assert result.install_hook is True
     assert result.run_first_sync is True
+
+
+def test_ask_integrations_pattern_c_no_additional_dirs_flag_forces_off(
+    tmp_path: Path,
+) -> None:
+    """--no-additional-directories still works for Pattern C (opts out
+    of both additionalDirectories and the bundled permissions.allow rules)."""
+    layout = _make_layout(tmp_path, "C")
+    result = ask_integrations(
+        layout=layout,
+        args_no_install_hook=False,
+        args_no_claudemd_snippet=False,
+        args_no_additional_directories=True,  # explicit opt-out
+        args_skip_first_sync=False,
+        args_commit_settings=False,
+        args_non_interactive=True,
+        env={},
+    )
+    assert result.add_additional_directories is False
 
 
 def test_ask_integrations_no_install_hook_flag_forces_off(tmp_path: Path) -> None:

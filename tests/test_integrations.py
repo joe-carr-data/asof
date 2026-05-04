@@ -324,13 +324,16 @@ def test_settings_preserves_existing_keys(tmp_path: Path) -> None:
     assert "/some/other/dir" in cfg["permissions"]["additionalDirectories"]
     # Wiki dir appended (not overwritten)
     assert str(request.layout.wiki_dir) in cfg["permissions"]["additionalDirectories"]
-    # P8 fix: init also pre-approves Read/Write/Edit/MultiEdit on wiki_dir
-    # so the agent can ingest source-summaries without per-file prompts.
+    # P8 fix: init pre-approves Read on the whole wiki + project-scoped
+    # Write/Edit/MultiEdit so the agent can ingest source-summaries without
+    # per-file prompts (and without write access to OTHER projects in a
+    # shared Pattern A wiki — Codex round-2 phase-8 BLOCKING).
     wiki_dir = str(request.layout.wiki_dir)
+    slug = request.project_slug
     assert f"Read({wiki_dir}/**)" in cfg["permissions"]["allow"]
-    assert f"Write({wiki_dir}/wiki/**)" in cfg["permissions"]["allow"]
-    assert f"Edit({wiki_dir}/wiki/**)" in cfg["permissions"]["allow"]
-    assert f"MultiEdit({wiki_dir}/wiki/**)" in cfg["permissions"]["allow"]
+    assert f"Write({wiki_dir}/wiki/{slug}/**)" in cfg["permissions"]["allow"]
+    assert f"Edit({wiki_dir}/wiki/{slug}/**)" in cfg["permissions"]["allow"]
+    assert f"MultiEdit({wiki_dir}/wiki/{slug}/**)" in cfg["permissions"]["allow"]
 
 
 def test_settings_idempotent_for_additional_directories(tmp_path: Path) -> None:
@@ -342,12 +345,15 @@ def test_settings_idempotent_for_additional_directories(tmp_path: Path) -> None:
 
 
 def test_settings_writes_wiki_permission_rules(tmp_path: Path) -> None:
-    """P8 T10: init pre-approves Read across the wiki + Write/Edit/MultiEdit
-    on wiki/<project>/ so per-file ingest doesn't trigger Claude Code's
-    permission prompt for every source-summary write.
+    """P8 T10: init pre-approves Read across the wiki + project-scoped
+    Write/Edit/MultiEdit on wiki/<project_slug>/ so per-file ingest
+    doesn't trigger Claude Code's permission prompt for every source-
+    summary write.
 
-    Tight scope: writes are restricted to wiki/<project>/, NOT raw/ (rsync-
-    managed) or wiki_dir root files (.asof.json, CLAUDE.md, init/sync-managed).
+    Tight scope: writes are project-scoped (NOT wiki-wide), and exclude
+    raw/ (rsync-managed) and wiki root (.asof.json, CLAUDE.md — init/
+    sync-managed). Project scope matters in shared Pattern A wikis to
+    prevent cross-project write overgrant (Codex round-2 phase-8 BLOCKING).
     """
     request = _build_request(tmp_path)
     update_settings(request, dry_run=False)
@@ -356,35 +362,68 @@ def test_settings_writes_wiki_permission_rules(tmp_path: Path) -> None:
     )
     allow = cfg["permissions"]["allow"]
     wiki_dir = str(request.layout.wiki_dir)
+    slug = request.project_slug
     assert f"Read({wiki_dir}/**)" in allow
-    assert f"Write({wiki_dir}/wiki/**)" in allow
-    assert f"Edit({wiki_dir}/wiki/**)" in allow
-    assert f"MultiEdit({wiki_dir}/wiki/**)" in allow
-    # Defense in depth: writes are NOT pre-approved on raw/ or root.
-    assert f"Write({wiki_dir}/raw/**)" not in allow
-    assert f"Write({wiki_dir}/**)" not in allow
+    assert f"Write({wiki_dir}/wiki/{slug}/**)" in allow
+    assert f"Edit({wiki_dir}/wiki/{slug}/**)" in allow
+    assert f"MultiEdit({wiki_dir}/wiki/{slug}/**)" in allow
+    # Defense in depth (Codex round-2 phase-8): no broader/wrong-scope rules.
+    for tool in ("Write", "Edit", "MultiEdit"):
+        assert f"{tool}({wiki_dir}/raw/**)" not in allow, (
+            f"raw/ is rsync-managed; {tool} must NOT be pre-approved there"
+        )
+        assert f"{tool}({wiki_dir}/**)" not in allow, (
+            f"wiki-wide {tool} would overgrant in shared Pattern A vaults"
+        )
+        assert f"{tool}({wiki_dir}/wiki/**)" not in allow, (
+            f"wiki-level {tool} would overgrant cross-project in shared vaults"
+        )
+
+
+def test_settings_pattern_c_writes_permission_rules_but_not_additional_dirs(
+    tmp_path: Path,
+) -> None:
+    """Codex round-2 phase-8 BLOCKING: Pattern C still needs permission
+    rules to skip the per-file ingest prompts, even though additional-
+    Directories isn't needed (the wiki is inside the repo cwd)."""
+    request = _build_request(tmp_path, pattern="C")
+    update_settings(request, dry_run=False)
+    cfg = json.loads(
+        (request.project_root / ".claude" / "settings.local.json").read_text()
+    )
+    permissions = cfg["permissions"]
+    # additionalDirectories is NOT added for Pattern C (wiki already in cwd).
+    assert "additionalDirectories" not in permissions
+    # But permission allow rules ARE added (Pattern C hits the same wart).
+    allow = permissions["allow"]
+    wiki_dir = str(request.layout.wiki_dir)
+    slug = request.project_slug
+    assert f"Read({wiki_dir}/**)" in allow
+    assert f"Write({wiki_dir}/wiki/{slug}/**)" in allow
+    assert f"Edit({wiki_dir}/wiki/{slug}/**)" in allow
+    assert f"MultiEdit({wiki_dir}/wiki/{slug}/**)" in allow
 
 
 def test_settings_skips_wiki_permission_rules_when_no_additional_dirs(
     tmp_path: Path,
 ) -> None:
-    """The permission-allow rules are bundled with the additionalDirectories
-    integration question. If the user opts out (--no-additional-directories),
-    NEITHER additionalDirectories nor permissions.allow rules get added."""
+    """The permission-allow rules are bundled with the same yes/no question
+    as additionalDirectories (the underlying user choice is "let asof's
+    agent manage this wiki"). Opt-out via --no-additional-directories
+    skips BOTH."""
     request = _build_request(tmp_path, add_additional_directories=False)
     # Hook still gets registered (different integration), so this DOES write.
     update_settings(request, dry_run=False)
     cfg = json.loads(
         (request.project_root / ".claude" / "settings.local.json").read_text()
     )
+    permissions = cfg.get("permissions", {})
     # No additional dirs.
-    assert "additionalDirectories" not in cfg.get("permissions", {})
-    # No allow rules — when add_additional_directories is False, permissions.allow
-    # is either absent or doesn't contain wiki rules.
-    allow = cfg.get("permissions", {}).get("allow", [])
+    assert "additionalDirectories" not in permissions
+    # No allow rules with our wiki paths.
+    allow = permissions.get("allow", [])
     wiki_dir = str(request.layout.wiki_dir)
     assert f"Read({wiki_dir}/**)" not in allow
-    assert f"Write({wiki_dir}/wiki/**)" not in allow
 
 
 def test_settings_idempotent_for_permission_allow_rules(tmp_path: Path) -> None:
@@ -397,11 +436,12 @@ def test_settings_idempotent_for_permission_allow_rules(tmp_path: Path) -> None:
     )
     allow = cfg["permissions"]["allow"]
     wiki_dir = str(request.layout.wiki_dir)
+    slug = request.project_slug
     # Each rule appears exactly once.
     assert allow.count(f"Read({wiki_dir}/**)") == 1
-    assert allow.count(f"Write({wiki_dir}/wiki/**)") == 1
-    assert allow.count(f"Edit({wiki_dir}/wiki/**)") == 1
-    assert allow.count(f"MultiEdit({wiki_dir}/wiki/**)") == 1
+    assert allow.count(f"Write({wiki_dir}/wiki/{slug}/**)") == 1
+    assert allow.count(f"Edit({wiki_dir}/wiki/{slug}/**)") == 1
+    assert allow.count(f"MultiEdit({wiki_dir}/wiki/{slug}/**)") == 1
 
 
 def test_settings_idempotent_for_hook_entry(tmp_path: Path) -> None:

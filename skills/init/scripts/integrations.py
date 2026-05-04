@@ -268,21 +268,25 @@ def _settings_path(request: IntegrationRequest) -> Path:
     return request.project_root / ".claude" / name
 
 
-def _wiki_permission_rules(wiki_dir: Path) -> list[str]:
-    """The Claude Code permission rules pre-approved by init for `wiki_dir`.
+def _wiki_permission_rules(wiki_dir: Path, project_slug: str) -> list[str]:
+    """The Claude Code permission rules pre-approved by init for one project.
 
     Tight scope:
       - Read across the whole wiki (the agent reads index.md, _candidates.md,
         and source files in raw/ before deciding what to write).
-      - Write/Edit/MultiEdit ONLY under wiki/<project>/ — raw/ is rsync-
-        managed and root files (.asof.json, CLAUDE.md) are init/sync-managed,
-        so the agent should never write there directly.
+      - Write/Edit/MultiEdit ONLY under wiki/<project_slug>/ — raw/ is
+        rsync-managed and root files (.asof.json, CLAUDE.md) are init/sync-
+        managed, so the agent should never write there directly. The
+        per-project scope matters in shared Pattern A wikis: init for
+        project A must NOT grant write access to project B's pages (Codex
+        round-2 phase-8 BLOCKING fix).
 
     Without these rules, every source-summary the agent writes during ingest
     triggers a separate permission prompt — at 50 source files × ~5 writes
     per ingest, that's 250+ prompts, which makes the plugin unusable on
     real corpora. With these rules, the user grants asof write access to
-    its own wiki dir at init time and can ingest at scale without friction.
+    its own wiki/<project>/ at init time and can ingest at scale without
+    friction.
 
     Permission syntax verified via Claude Code's permissions.md docs
     (https://code.claude.com/docs/en/permissions.md): flat array of
@@ -291,9 +295,9 @@ def _wiki_permission_rules(wiki_dir: Path) -> list[str]:
     base = str(wiki_dir)
     return [
         f"Read({base}/**)",
-        f"Write({base}/wiki/**)",
-        f"Edit({base}/wiki/**)",
-        f"MultiEdit({base}/wiki/**)",
+        f"Write({base}/wiki/{project_slug}/**)",
+        f"Edit({base}/wiki/{project_slug}/**)",
+        f"MultiEdit({base}/wiki/{project_slug}/**)",
     ]
 
 
@@ -338,11 +342,14 @@ def update_settings(
             f"JSON object; got {type(existing).__name__}."
         )
 
-    # Merge additionalDirectories + permissions.allow (bundled — both fire
-    # under the same integration choice). Only Pattern A/B; Pattern C's
-    # wiki is already inside the source repo so additionalDirectories is
-    # redundant, and the user can grant permissions per-project as they
-    # choose.
+    # The `add_additional_directories` choice gates BOTH:
+    #   1. permissions.additionalDirectories — applies only to Pattern A/B
+    #      (Pattern C's wiki is inside the cwd, so additionalDirectories
+    #      registration is redundant).
+    #   2. permissions.allow rules — applies to ALL patterns (Pattern C
+    #      hits the same per-file-prompt UX wart without these). Codex
+    #      round-2 phase-8 BLOCKING fix: previously the allow rules
+    #      were gated on Pattern A/B only, leaving Pattern C broken.
     additional_added = False
     additional_already_present = False
     if request.choices.add_additional_directories:
@@ -352,28 +359,34 @@ def update_settings(
                 f"asof:init: settings.permissions must be a JSON object in "
                 f"{path!s}"
             )
-        dirs = permissions.setdefault("additionalDirectories", [])
-        if not isinstance(dirs, list):
-            raise RuntimeError(
-                f"asof:init: settings.permissions.additionalDirectories must "
-                f"be a JSON array in {path!s}"
-            )
-        wiki_dir_str = str(request.layout.wiki_dir)
-        if wiki_dir_str in dirs:
-            additional_already_present = True
-        else:
-            dirs.append(wiki_dir_str)
-            additional_added = True
 
-        # Pre-approve Read/Write/Edit/MultiEdit on the wiki dir. Idempotent:
-        # rules already present don't get duplicated.
+        # additionalDirectories — only Pattern A/B.
+        if request.layout.pattern != "C":
+            dirs = permissions.setdefault("additionalDirectories", [])
+            if not isinstance(dirs, list):
+                raise RuntimeError(
+                    f"asof:init: settings.permissions.additionalDirectories "
+                    f"must be a JSON array in {path!s}"
+                )
+            wiki_dir_str = str(request.layout.wiki_dir)
+            if wiki_dir_str in dirs:
+                additional_already_present = True
+            else:
+                dirs.append(wiki_dir_str)
+                additional_added = True
+
+        # permissions.allow — ALL patterns. Project-scoped writes per Codex
+        # round-2 phase-8 BLOCKING: in shared Pattern A wikis, init for
+        # project A must NOT pre-approve writes to project B's pages.
         allow_rules = permissions.setdefault("allow", [])
         if not isinstance(allow_rules, list):
             raise RuntimeError(
                 f"asof:init: settings.permissions.allow must be a JSON array "
                 f"in {path!s}"
             )
-        for rule in _wiki_permission_rules(request.layout.wiki_dir):
+        for rule in _wiki_permission_rules(
+            request.layout.wiki_dir, request.project_slug
+        ):
             if rule not in allow_rules:
                 allow_rules.append(rule)
 

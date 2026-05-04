@@ -281,8 +281,13 @@ def ask_integrations(
     choice to False (the user explicitly opted out). Otherwise we prompt
     interactively or use the defaults (all True except `commit_settings`).
 
-    Pattern C overrides `add_additional_directories` to False because the
-    wiki lives inside the source repo — no need to add it as an extra dir.
+    `add_additional_directories` controls TWO bundled settings entries:
+    `permissions.additionalDirectories` (only meaningful for Pattern A/B —
+    Pattern C's wiki is inside the repo so already-accessible) AND
+    `permissions.allow` rules pre-approving Read/Write/Edit/MultiEdit on
+    the wiki (needed for ALL patterns — without these, the agent prompts
+    on every source-summary write during ingest). Both fire under one
+    user-facing question.
     """
     non_interactive = is_non_interactive(args_non_interactive, env)
 
@@ -313,16 +318,32 @@ def ask_integrations(
             output_fn=output_fn,
         )
 
-    # Add additionalDirectories: default Yes for Pattern A/B; forced No for C.
-    # --no-additional-directories also forces No.
-    if layout.pattern == "C" or args_no_additional_directories:
+    # Register the wiki with Claude Code: default Yes for ALL patterns;
+    # --no-additional-directories forces No (legacy flag name kept for
+    # CLI stability — the underlying choice now controls more than just
+    # additionalDirectories, see IntegrationChoice docstring).
+    #
+    # Pattern A/B: writes additionalDirectories AND permissions.allow rules.
+    # Pattern C: writes ONLY permissions.allow rules (additionalDirectories
+    #   is moot since the wiki lives inside the repo cwd; Claude Code sees
+    #   it without explicit registration). Permission rules still essential
+    #   to skip the per-file ingest prompt — same UX requirement as A/B.
+    if args_no_additional_directories:
         add_additional_directories = False
     elif non_interactive:
         add_additional_directories = True
     else:
+        prompt_text = (
+            f"Pre-approve agent writes to {layout.wiki_dir}/wiki/ so ingest "
+            "doesn't prompt on every file"
+            + (
+                f", and add {layout.wiki_dir} to additionalDirectories?"
+                if layout.pattern != "C"
+                else "?"
+            )
+        )
         add_additional_directories = prompt_yes_no(
-            f"Add {layout.wiki_dir} to your project's additionalDirectories so "
-            "the agent can read the wiki?",
+            prompt_text,
             default=True,
             input_fn=input_fn,
             output_fn=output_fn,

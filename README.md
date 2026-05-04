@@ -147,7 +147,7 @@ v1 is single-user. The wiki is plain markdown in a git repo, so async PR-style c
 - Atomic writes (temp-then-rename) for every config + markdown + JSON write.
 - Non-interactive mode for CI (`--non-interactive`, `--yes`, `--dry-run`, `ASOF_NON_INTERACTIVE=1`).
 - Three example wikis lint clean from a fresh checkout on every push.
-- 606 unit + integration tests; init/sync/lint exercised as real subprocesses, with lock-contention coverage.
+- 608 unit + integration tests; init/sync/lint exercised as real subprocesses, with lock-contention coverage.
 
 ## Documentation
 
