@@ -3,7 +3,7 @@ name: init
 description: Bootstrap a time-aware asof wiki for a project. Five-stage interactive wizard — preflight checks, layout choice (shared / per-project / in-repo), wiki dir + config creation, project page scaffold, integrations (CLAUDE.md snippet, change-reminder hook, settings.json edits, optional first sync). Use when starting a wiki for a new codebase, research topic, business KB, book club, or any markdown corpus that should be remembered with mtime semantics.
 when_to_use: Trigger phrases — "init the wiki", "asof init", "set up the wiki", "create a wiki for this project", "bootstrap an asof wiki", "start tracking docs over time for X", "scaffold a new asof wiki".
 disable-model-invocation: true
-allowed-tools: Bash(python3 *) Bash(mkdir *) Bash(cp *) Bash(test *) Bash(which *) Bash(rsync --version) Bash(git --version) Bash(stat *) Read Write Edit
+allowed-tools: Bash(python3 *) Bash(mkdir *) Bash(cp *) Bash(test *) Bash(which *) Bash(rsync --version) Bash(git --version) Bash(stat *) Read Write Edit AskUserQuestion
 argument-hint: "[project-name] [source-path] [--pattern A|B|C] [--wiki-dir PATH] [--non-interactive] [--yes] [--dry-run] [--no-install-hook] [--no-claudemd-snippet] [--no-additional-directories] [--skip-first-sync] [--commit-settings]"
 ---
 
@@ -18,6 +18,22 @@ python3 ${CLAUDE_SKILL_DIR}/scripts/init.py $ARGUMENTS
 ```
 
 Both positional args (`project_name`, `source_path`) are required. Everything else is optional with documented defaults.
+
+### When the user invokes `/asof:init` without args
+
+**Do NOT free-form-ask the user via prose.** Use Claude Code's `AskUserQuestion` tool to present a structured, click-to-select interface for the missing inputs. Run them as one batched call (multiple questions in a single tool use). Suggested questions and defaults:
+
+1. **project_name** — open input via "Other"; pre-suggest the cwd basename (`Path.cwd().name`) as the recommended default. Slugify-friendly form (lowercase, dashes for spaces) is preferred.
+2. **source_path** — open input via "Other"; pre-suggest `Path.cwd()` as the recommended default. If cwd has an obvious-source subdir (`docs/`, `src/`, `notes/`, `papers/`), offer that as a second labeled option.
+3. **pattern** — single-select with three options:
+   - `Pattern A — shared wiki at ~/.claude/asof/ (Recommended)` — best for solo users with multiple projects.
+   - `Pattern B — per-project wiki under home` — strict per-project isolation.
+   - `Pattern C — wiki inside the source repo at <repo>/.asof/` — for teams + open source; wiki travels with git.
+4. **first sync** — single-select: `Run a first sync now (Recommended)` / `Skip the first sync — I'll run /asof:sync later`.
+
+After collecting answers, run the script with `--non-interactive` (since the agent already gathered every choice) plus the user's selections. Default the rest of the integrations (hook, CLAUDE.md snippet, additional-directories) to ON unless the user explicitly opted out — these defaults are correct for ~99% of users and asking again would just add friction.
+
+The structured UI matters: free-form prose Q&A means the user types yes/no/path-strings into chat, which is slow, error-prone, and doesn't surface the recommended default visually. `AskUserQuestion` shows a clickable list with "(Recommended)" tags users can accept in one click.
 
 ## What the script does, in five stages
 
