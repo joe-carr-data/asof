@@ -1,0 +1,16 @@
+# asof-wiki:gitignore (modified for examples)
+#
+# In a real Pattern C wiki you'd ignore .asof/raw/ + .asof/.last-sync/ since
+# they're regenerable working state. For the example wikis we INCLUDE raw/
+# in the commit so CI can lint them from a fresh checkout (path-mismatch
+# would fire if raw files weren't there).
+#
+# When you copy this example into your own repo, restore the standard
+# .gitignore by uncommenting the asof working-state lines below.
+
+# .asof/raw/                 # uncomment in your own repo
+.asof/.last-sync/
+.asof/.pending-sync/
+.asof/.asof.lock
+.asof/wiki.bak.*/
+# /asof-wiki:gitignore

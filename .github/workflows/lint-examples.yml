@@ -1,0 +1,64 @@
+# Lint the three example wikis on every push / PR. Each example uses
+# Pattern C (in-repo `.asof/`), so the workflow runs lint with --wiki-dir
+# pointing at each example's `.asof/` directory directly from the
+# checked-out source tree.
+#
+# `--severity warn` filters out INFO-only orphan-page findings — those
+# are useful for triage but shouldn't gate CI. ERROR or WARN findings
+# fail the job; clean wikis pass with exit 0.
+#
+# Per PLAN.md §15 row 6 + §6.3.
+
+name: lint-examples
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  lint-examples:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install rsync
+        run: sudo apt-get update && sudo apt-get install -y rsync
+
+      - name: Lint codebase-wiki
+        run: |
+          python3 skills/lint/scripts/lint.py \
+            --wiki-dir examples/codebase-wiki/.asof \
+            --severity warn
+
+      - name: Lint research-wiki
+        run: |
+          python3 skills/lint/scripts/lint.py \
+            --wiki-dir examples/research-wiki/.asof \
+            --severity warn
+
+      - name: Lint book-wiki
+        run: |
+          python3 skills/lint/scripts/lint.py \
+            --wiki-dir examples/book-wiki/.asof \
+            --severity warn
+
+      - name: Lint everything (JSON, info severity, non-gating)
+        # Run a strict pass at INFO severity for visibility into orphan
+        # pages and other nudges, but don't fail the job if it finds
+        # any — this is informational only.
+        if: always()
+        run: |
+          for wiki in codebase-wiki research-wiki book-wiki; do
+            echo "=== $wiki (INFO severity, non-gating) ==="
+            python3 skills/lint/scripts/lint.py \
+              --wiki-dir "examples/$wiki/.asof" \
+              --severity info \
+              --json || true
+          done

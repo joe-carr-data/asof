@@ -1,0 +1,38 @@
+{
+  "lint_thresholds": {
+    "candidate_promotion_threshold": 3,
+    "mtime_drift_days": 30,
+    "supersession_gap_days": 60
+  },
+  "min_reader_version": "0.1.0-dev",
+  "min_writer_version": "0.1.0-dev",
+  "projects": [
+    {
+      "excludes": [
+        ".git",
+        ".asof",
+        ".last-sync",
+        "node_modules",
+        "__pycache__",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".mypy_cache",
+        ".venv",
+        "venv",
+        ".tox",
+        ".nox",
+        "dist",
+        "build",
+        "site-packages",
+        ".claude",
+        ".idea",
+        ".vscode",
+        "test_results"
+      ],
+      "name": "scaling-laws",
+      "raw_subdir": "raw/scaling-laws",
+      "wiki_subdir": "wiki/scaling-laws"
+    }
+  ],
+  "schema_version": "1.0"
+}
