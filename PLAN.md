@@ -734,7 +734,7 @@ Each phase shippable on its own:
 | **2** | `references/SCHEMA.md` extracted from current `~/Desktop/Brain/CLAUDE.md`, generalized away from Karpathy prose. + templates. | Required for both `init` and `lint`. |
 | **3** | `asof:init` skill — bootstrap, config writer, optional hook + CLAUDE.md snippet integration. | Lets new users start. |
 | **4** | `asof:lint` skill — pure read-side, separate from sync. | Lets us audit existing wiki and example wikis before v1.0. |
-| **5** | Tests (pytest + fixtures) — codify the four bugs we hit. | Before public release. |
+| **5** | **Cross-phase integration tests** — real CLI subprocess tests over Pattern A/B/C wikis covering the init → sync → lint chain, cwd/env wiki resolution, lock behavior under contention. Phase 1-4 already shipped 569 unit tests; phase 5 fills the structural gap (most existing tests call internals directly). | Before public release; Codex round-3 phase-4 advice. |
 | **6** | `examples/` — three small wikis (codebase, research, book). | Demos > docs. |
 | **7** | **README v1** — written *during* phase 1 (not at the end). Skeleton + the core "Install in one command" pitch lands with the first working `sync` skill. Updated after each phase to keep showing what's actually working. | The README is the conversion surface; treat it as a first-class artifact, not polish. |
 | **8** | **README v1.0 final** — asciinema demo, screenshots (Obsidian graph view, supersession in rendered MD, sync output), examples linked. Install verified end-to-end on a clean macOS + clean Linux box. **v1.0 tag.** | Public release. |
