@@ -30,9 +30,11 @@ SCRIPTS_BY_SKILL: dict[str, Path] = {
 #: Env vars that asof's skills read from the parent environment. Stripped
 #: by default in `run_skill()` so tests are hermetic — a developer with
 #: ASOF_DIR set in their shell would otherwise leak it into every child
-#: process and break cwd-resolution tests. Codex round-1 phase-5 HIGH.
+#: process and break cwd-resolution tests. Codex round-1 phase-5 HIGH;
+#: ASOF_NON_INTERACTIVE added round-2 (sync.py + wizard.py read it).
 _ASOF_ENV_VARS: tuple[str, ...] = (
     "ASOF_DIR",
+    "ASOF_NON_INTERACTIVE",
     "ASOF_SKILL_VERSION_OVERRIDE",
 )
 
