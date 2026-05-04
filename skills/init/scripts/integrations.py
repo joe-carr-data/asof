@@ -268,6 +268,35 @@ def _settings_path(request: IntegrationRequest) -> Path:
     return request.project_root / ".claude" / name
 
 
+def _wiki_permission_rules(wiki_dir: Path) -> list[str]:
+    """The Claude Code permission rules pre-approved by init for `wiki_dir`.
+
+    Tight scope:
+      - Read across the whole wiki (the agent reads index.md, _candidates.md,
+        and source files in raw/ before deciding what to write).
+      - Write/Edit/MultiEdit ONLY under wiki/<project>/ — raw/ is rsync-
+        managed and root files (.asof.json, CLAUDE.md) are init/sync-managed,
+        so the agent should never write there directly.
+
+    Without these rules, every source-summary the agent writes during ingest
+    triggers a separate permission prompt — at 50 source files × ~5 writes
+    per ingest, that's 250+ prompts, which makes the plugin unusable on
+    real corpora. With these rules, the user grants asof write access to
+    its own wiki dir at init time and can ingest at scale without friction.
+
+    Permission syntax verified via Claude Code's permissions.md docs
+    (https://code.claude.com/docs/en/permissions.md): flat array of
+    `Tool(specifier)` strings, gitignore-style globs.
+    """
+    base = str(wiki_dir)
+    return [
+        f"Read({base}/**)",
+        f"Write({base}/wiki/**)",
+        f"Edit({base}/wiki/**)",
+        f"MultiEdit({base}/wiki/**)",
+    ]
+
+
 def update_settings(
     request: IntegrationRequest, *, dry_run: bool = False
 ) -> tuple[Path, bool, bool]:
@@ -275,10 +304,15 @@ def update_settings(
 
     Returns: (path, additional_dir_added, additional_dir_already_present).
 
-    Two merges (each guarded against duplicates):
+    Three merges (each guarded against duplicates):
       - permissions.additionalDirectories: add layout.wiki_dir if absent
         (skipped for Pattern C — wiki is inside the repo, no `--add-dir`
-        needed).
+        needed). Bundled with the next item.
+      - permissions.allow: pre-approve Read across the wiki + Write/Edit/
+        MultiEdit on wiki/<project>/ so per-file ingest doesn't trigger
+        Claude Code's permission prompt for every source-summary write.
+        Bundled with additionalDirectories — same yes/no integration
+        question; both apply or neither.
       - hooks.PostToolUse: add a hook entry pointing at the installed hook
         script with the right `env` block. Skipped if a hook entry with
         the same command already exists.
@@ -304,7 +338,11 @@ def update_settings(
             f"JSON object; got {type(existing).__name__}."
         )
 
-    # Merge additionalDirectories (only if requested, i.e. Pattern A/B).
+    # Merge additionalDirectories + permissions.allow (bundled — both fire
+    # under the same integration choice). Only Pattern A/B; Pattern C's
+    # wiki is already inside the source repo so additionalDirectories is
+    # redundant, and the user can grant permissions per-project as they
+    # choose.
     additional_added = False
     additional_already_present = False
     if request.choices.add_additional_directories:
@@ -326,6 +364,18 @@ def update_settings(
         else:
             dirs.append(wiki_dir_str)
             additional_added = True
+
+        # Pre-approve Read/Write/Edit/MultiEdit on the wiki dir. Idempotent:
+        # rules already present don't get duplicated.
+        allow_rules = permissions.setdefault("allow", [])
+        if not isinstance(allow_rules, list):
+            raise RuntimeError(
+                f"asof:init: settings.permissions.allow must be a JSON array "
+                f"in {path!s}"
+            )
+        for rule in _wiki_permission_rules(request.layout.wiki_dir):
+            if rule not in allow_rules:
+                allow_rules.append(rule)
 
     # Merge hooks.PostToolUse (only if hook was opted in).
     if request.choices.install_hook:

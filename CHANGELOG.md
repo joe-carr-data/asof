@@ -61,18 +61,19 @@ To keep the maintenance cost of three shipped example wikis bounded
 
 ## [1.0.0] — 2026-05-04
 
-First stable release. Three skills (`init`, `sync`, `lint`), a PostToolUse change-reminder hook template, three shipped example wikis with CI lint coverage, and 603 unit + integration tests.
+First stable release. Three skills (`init`, `sync`, `lint`), a PostToolUse change-reminder hook template, three shipped example wikis with CI lint coverage, and 606 unit + integration tests.
 
 ### Added
 - **`asof:sync` skill** — rsync-mirrors source `*.md` files into `<wiki_dir>/raw/<project>/` and detects deltas (NEW / MODIFIED / DELETED) by comparing source mtimes against recorded `source_mtime` values in wiki source-summaries. Per-project locking via `fcntl.flock` on `<wiki_dir>/.asof.lock`. cwd-aware project auto-resolve. Per-project last-sync JSON reports. Auto-excludes a source-root `CLAUDE.md` that contains only `asof:init`'s marker-fenced `@`-import block (no user content) so asof's bootstrap doesn't pollute the wiki; mixed `CLAUDE.md` (user content + import block) syncs normally.
 - **`asof:init` skill** — 5-stage interactive wizard: preflight (Python 3.9+, rsync, git, Obsidian), wiki layout choice (Pattern A / B / C), wiki-dir + `.asof.json` creation, project page scaffold, integrations (two-file CLAUDE.md / asof-context integration, change-reminder hook, settings file edits, optional first sync). Atomic writes, idempotent re-runs, marker-fenced edits.
   - **Two-file CLAUDE.md integration**: bulk wiki-precedence body lives at `<project>/.claude/asof-context.md` (sync-excluded since `.claude/` is in `DEFAULT_EXCLUDES`); `<project>/CLAUDE.md` gets only a 3-line marker-fenced `@`-import block that transitively loads the bulk file via Claude Code's session-start memory loader. Prevents asof's own bootstrap from being sync-mirrored as if it were source content.
+  - **Bulk-ingest permission rules**: init's settings integration pre-approves `Read(<wiki_dir>/**)` + `Write/Edit/MultiEdit(<wiki_dir>/wiki/**)` in `permissions.allow` so the agent can ingest source-summaries without triggering Claude Code's permission prompt on every file write. Tight scope — writes are NOT pre-approved on `raw/` (rsync-managed) or wiki root (init/sync-managed). Bundled with the `additionalDirectories` integration question (`--no-additional-directories` opts out of both).
 - **`asof:lint` skill** — 7 page-level checks (frontmatter validity, path-mismatch, missing-mtime, removed-source, mtime-drift, supersession-gap, orphan-page) with severity grouping (3 ERROR, 3 WARN, 1 INFO). Pre-flight config-validity gate via shared `load_wiki_config` (halts on invalid config rather than cascading findings). Two narrow auto-fixes via `--fix`: insert today's date when `last_updated` is missing entirely, and append orphan-page entries to `index.md`. Read-only mode rejection per compat-matrix cell b. Text + JSON output.
 - **Schema spec** — [`references/SCHEMA.md`](references/SCHEMA.md) defines required frontmatter, page types, time-aware ingest rules (Newer source wins, Self-supersession, Removal), and the four-cell version-compat matrix.
 - **Hook template** — `templates/hooks/wiki_change_reminder.py` is a PostToolUse hook that reminds the agent to re-sync after `*.md` edits. Per-project debounced via O_EXCL atomic claim. Path-traversal-safe.
 - **Three example wikis** at [`examples/`](examples/): `codebase-wiki/` (tinyapp CLI demo), `research-wiki/` (Kaplan 2020 → Hoffmann 2022 scaling-law cross-source supersession), `book-wiki/` (Kahneman, *Thinking Fast and Slow*). All Pattern C, all lint clean from a fresh checkout.
 - **CI lint coverage** — `.github/workflows/lint-examples.yml` runs `lint --severity warn` on each example on every push and PR, plus a non-gating INFO pass for triage visibility.
-- **603 unit + integration tests** — every check has happy + failure paths; init/sync/lint exercised as real subprocesses; lock-contention tests with readiness handshake; cwd/env wiki-dir resolution coverage.
+- **606 unit + integration tests** — every check has happy + failure paths; init/sync/lint exercised as real subprocesses; lock-contention tests with readiness handshake; cwd/env wiki-dir resolution coverage.
 
 ### Schema (initial)
 
