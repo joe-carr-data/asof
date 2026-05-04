@@ -9,7 +9,7 @@
 
 [project]
 name = "asof"
-version = "0.1.0-dev"
+version = "1.0.0"
 description = "Time-aware wiki for Claude Code. Older claims age, newer ones supersede."
 requires-python = ">=3.9"
 license = { text = "MIT" }

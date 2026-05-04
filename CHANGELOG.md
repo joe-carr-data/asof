@@ -59,20 +59,30 @@ To keep the maintenance cost of three shipped example wikis bounded
 
 ## [Unreleased]
 
-### Added
-- Repository scaffold: `LICENSE` (MIT), `.gitignore`, `PLAN.md` (locked design
-  after four rounds of Codex review), directory layout, `README.md` skeleton.
-- This `CHANGELOG.md` with explicit schema-version semantics.
+## [1.0.0] — 2026-05-04
 
-### Pending (phases 1–8 per PLAN.md section 15)
-- `asof:sync` skill (phase 1)
-- Schema spec + templates (phase 2)
-- `asof:init` interactive wizard (phase 3)
-- `asof:lint` skill (phase 4)
-- Comprehensive test suite (phase 5)
-- Three example wikis with CI lint coverage (phase 6)
-- README polish + asciinema demo + screenshots (phase 7)
-- v1.0 release with end-to-end install verification on macOS + Linux (phase 8)
+First stable release. Three skills (`init`, `sync`, `lint`), a PostToolUse change-reminder hook template, three shipped example wikis with CI lint coverage, and 595 unit + integration tests.
+
+### Added
+- **`asof:sync` skill** — rsync-mirrors source `*.md` files into `<wiki_dir>/raw/<project>/` and detects deltas (NEW / MODIFIED / DELETED) by comparing source mtimes against recorded `source_mtime` values in wiki source-summaries. Per-project locking via `fcntl.flock` on `<wiki_dir>/.asof.lock`. cwd-aware project auto-resolve. Per-project last-sync JSON reports.
+- **`asof:init` skill** — 5-stage interactive wizard: preflight (Python 3.9+, rsync, git, Obsidian), wiki layout choice (Pattern A / B / C), wiki-dir + `.asof.json` creation, project page scaffold, integrations (CLAUDE.md snippet, change-reminder hook, settings file edits, optional first sync). Atomic writes, idempotent re-runs, marker-fenced edits.
+- **`asof:lint` skill** — 7 page-level checks (frontmatter validity, path-mismatch, missing-mtime, removed-source, mtime-drift, supersession-gap, orphan-page) with severity grouping (3 ERROR, 3 WARN, 1 INFO). Pre-flight config-validity gate via shared `load_wiki_config` (halts on invalid config rather than cascading findings). Two narrow auto-fixes via `--fix`: insert today's date when `last_updated` is missing entirely, and append orphan-page entries to `index.md`. Read-only mode rejection per compat-matrix cell b. Text + JSON output.
+- **Schema spec** — [`references/SCHEMA.md`](references/SCHEMA.md) defines required frontmatter, page types, time-aware ingest rules (Newer source wins, Self-supersession, Removal), and the four-cell version-compat matrix.
+- **Hook template** — `templates/hooks/wiki_change_reminder.py` is a PostToolUse hook that reminds the agent to re-sync after `*.md` edits. Per-project debounced via O_EXCL atomic claim. Path-traversal-safe.
+- **Three example wikis** at [`examples/`](examples/): `codebase-wiki/` (tinyapp CLI demo), `research-wiki/` (Kaplan 2020 → Hoffmann 2022 scaling-law cross-source supersession), `book-wiki/` (Kahneman, *Thinking Fast and Slow*). All Pattern C, all lint clean from a fresh checkout.
+- **CI lint coverage** — `.github/workflows/lint-examples.yml` runs `lint --severity warn` on each example on every push and PR, plus a non-gating INFO pass for triage visibility.
+- **595 unit + integration tests** — every check has happy + failure paths; init/sync/lint exercised as real subprocesses; lock-contention tests with readiness handshake; cwd/env wiki-dir resolution coverage.
+
+### Schema (initial)
+
+- `schema_version`: `"1.0"`.
+- `min_reader_version` and `min_writer_version` in fresh-init wikis: `"1.0.0"` (the released skill version).
+
+### Distribution
+
+- Plugin manifest at `.claude-plugin/plugin.json`.
+- Stdlib-only runtime (no `pip install`, no `npm i`, no `uv sync`); requires Python 3.9+ and `rsync`.
+- Install: `/plugin marketplace add joe-carr-data/asof` then `/plugin install asof@joe-carr-data` in any Claude Code session.
 
 ## [0.1.0-dev] — pre-release
 
