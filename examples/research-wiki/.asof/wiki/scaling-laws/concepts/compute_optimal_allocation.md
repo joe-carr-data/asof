@@ -23,9 +23,9 @@ For compute-optimal training, model size and dataset size should scale **roughly
 
 In practice: given compute budget C, search over (N, D) such that N × D × 6 ≈ C and N/D ≈ 1/20, then pick the (N, D) pair that minimizes test loss.
 
-## Self-supersession
+## Cross-source supersession
 
-Previously (Kaplan 2020): the prescription was 73% of compute → parameters, 27% → data, with diminishing returns from extra tokens once N was "right". This is **superseded by** Hoffmann 2022. The Kaplan 2020 sweep used a fixed learning-rate schedule across model sizes, biasing the optimum toward larger models. Once the LR schedule varies per size, the optimum collapses to the ~50/50 compute split that Chinchilla reports.
+Previously (Kaplan 2020): the prescription was 73% of compute → parameters, 27% → data, with diminishing returns from extra tokens once N was "right". This is **superseded by** Hoffmann 2022 (a *different* source, per SCHEMA §6.4 — not the same source re-ingested with a newer mtime, which would be §6.5 self-supersession). The Kaplan 2020 sweep used a fixed learning-rate schedule across model sizes, biasing the optimum toward larger models. Once the LR schedule varies per size, the optimum collapses to the ~50/50 compute split that Chinchilla reports.
 
 The Kaplan 2020 power-law functional form for L(C) still holds — only the allocation prescription was overturned.
 

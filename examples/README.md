@@ -29,7 +29,7 @@ If you can lint them from a fresh clone of this repo, they're portable. CI does 
 ## Schema features per example
 
 - **codebase-wiki**: source-summary citations, entity/concept cross-references, index curation.
-- **research-wiki**: explicit supersession via `## Self-supersession` / "superseded by" body notes (lint's supersession-gap WARN trigger is exercised — gap = ~26 months between Kaplan and Hoffmann mtimes).
+- **research-wiki**: explicit cross-source supersession via `## Cross-source supersession` heading + "superseded by" prose (SCHEMA §6.4: a *different* source supersedes an older one — not §6.5 self-supersession, which is the same source re-ingested with a newer mtime). Lint's supersession-gap WARN trigger is exercised: gap = ~26 months between Kaplan and Hoffmann mtimes.
 - **book-wiki**: aliased entities (System 1 / "fast thinking" / "intuitive system"), tags, project-relative links between sources / entities / concepts.
 
 ## Run locally
