@@ -53,7 +53,7 @@ Each rendered page passes through `verify_substituted()` (no leftover `{{KEY}}` 
 
 Four optional actions (each interactive yes/no, or driven by flags):
 
-1. **Append CLAUDE.md snippet** to the project's `CLAUDE.md` so future Claude Code sessions read the wiki first. Marker-fenced for safe re-runs.
+1. **Install the two-file CLAUDE.md / asof-context integration.** Writes the bulk wiki-precedence body to `<project>/.claude/asof-context.md` (sync-excluded by default since `.claude/` is in `DEFAULT_EXCLUDES`), then appends a 3-line marker-fenced `@`-import block to `<project>/CLAUDE.md` that transitively loads the bulk file via Claude Code's session-start memory loader. The two-file split prevents asof's own bootstrap content from being sync-mirrored into the wiki's `raw/` as if it were source. `asof-context.md` is written FIRST (atomicity: if it fails, CLAUDE.md is untouched, so we never end up with a CLAUDE.md importing a missing file). Marker fences make idempotent re-runs safe.
 2. **Install the PostToolUse change-reminder hook** in `<project>/.claude/hooks/asof_wiki_change_reminder.py` — fires after `*.md` edits with a "wiki may now be stale" reminder. Per-project debounced + path-traversal-safe (gpt-5.2-pro round-2 fixes baked in).
 3. **Edit settings file** to register the hook + add wiki_dir to `permissions.additionalDirectories`. **Default target: `.claude/settings.local.json`** (gitignored — machine-portable absolute paths don't end up in commits). `--commit-settings` opts into the committed `.claude/settings.json`.
 4. **Run a first sync** (`asof:sync --project <slug> --non-interactive`) for immediate feedback that the wiki is wired correctly.

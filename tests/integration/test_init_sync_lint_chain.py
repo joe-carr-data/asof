@@ -182,6 +182,68 @@ def test_source_summary_with_missing_raw_fails_lint(
 # ─── Pattern C end-to-end ─────────────────────────────────────────────────
 
 
+def test_marker_only_claudemd_not_ingested_by_sync(
+    tmp_path: Path,
+) -> None:
+    """P8 fix: when init writes a marker-only CLAUDE.md (because no user
+    CLAUDE.md existed pre-init), sync must NOT mirror it into raw/ —
+    otherwise the wiki ingests asof's own bootstrap as if it were source.
+
+    Regression check for the wart that surfaced during phase 8 smoke
+    test: fresh source dir → init creates CLAUDE.md (marker-only) →
+    sync used to mirror it → agent had to summarize asof's own snippet.
+    Post-fix: rsync excludes marker-only source-root CLAUDE.md.
+    """
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "intro.md").write_text("# Intro\n\nReal user content.\n")
+    wiki_dir = tmp_path / "wiki"
+    init_result = run_skill(
+        "init",
+        [
+            "smokeproj",
+            str(source),
+            "--pattern", "A",
+            "--wiki-dir", str(wiki_dir),
+            "--non-interactive",
+            "--no-install-hook",
+            "--no-additional-directories",
+            # Note: NOT passing --no-claudemd-snippet, so init DOES write
+            # the marker-only CLAUDE.md + asof-context.md.
+            "--skip-first-sync",
+        ],
+    )
+    init_result.assert_success("init bootstrap")
+
+    # Verify init wrote the two-file integration.
+    assert (source / "CLAUDE.md").is_file(), "marker-only CLAUDE.md created by init"
+    assert (
+        source / ".claude" / "asof-context.md"
+    ).is_file(), "bulk asof-context.md created by init"
+
+    # Now sync — should NOT mirror the marker-only CLAUDE.md.
+    sync_result = run_skill(
+        "sync",
+        [
+            "smokeproj",
+            "--wiki-dir", str(wiki_dir),
+            "--non-interactive",
+            "--summary-only",
+        ],
+    )
+    sync_result.assert_success("sync after init")
+
+    raw = wiki_dir / "raw" / "smokeproj"
+    assert (raw / "intro.md").is_file(), "user-authored intro.md got synced"
+    assert not (raw / "CLAUDE.md").exists(), (
+        "marker-only CLAUDE.md MUST NOT appear in raw/ — that would mean "
+        "asof's own snippet got sync-mirrored, the exact wart we're fixing"
+    )
+
+    # asof-context.md is in source/.claude/, which DEFAULT_EXCLUDES skips.
+    assert not (raw / ".claude").exists()
+
+
 def test_pattern_c_init_sync_lint(pattern_c_wiki: Path) -> None:
     """Pattern C: bootstrap + drop *.md inside the repo + sync + lint."""
     repo = pattern_c_wiki.parent

@@ -14,6 +14,7 @@ from typing import Any
 
 import pytest
 from integrations import (
+    ASOF_CONTEXT_RELPATH,
     HOOK_MATCHER,
     HOOK_SCRIPT_FILENAME,
     SNIPPET_CLOSE_MARKER,
@@ -75,35 +76,71 @@ def _build_request(
 # ─── 1) CLAUDE.md snippet ──────────────────────────────────────────────────
 
 
-def test_snippet_creates_claudemd_when_missing(tmp_path: Path) -> None:
+def test_snippet_creates_both_files_when_claudemd_missing(tmp_path: Path) -> None:
+    """P8 fix (two-file design): asof-context.md gets the bulk wiki-precedence
+    body; CLAUDE.md gets just the marker-fenced @-import block."""
     request = _build_request(tmp_path)
     appended, skipped = append_claudemd_snippet(
         request, today=TODAY, dry_run=False
     )
     assert appended is True
     assert skipped is False
-    target = request.project_root / "CLAUDE.md"
-    assert target.is_file()
-    text = target.read_text()
-    assert SNIPPET_OPEN_MARKER in text
-    assert SNIPPET_CLOSE_MARKER in text
-    assert "myproject" in text
-    assert str(request.layout.wiki_dir) in text
+
+    # CLAUDE.md exists and contains ONLY the marker-fenced @-import — no bulk.
+    claudemd = request.project_root / "CLAUDE.md"
+    assert claudemd.is_file()
+    claudemd_text = claudemd.read_text(encoding="utf-8")
+    assert SNIPPET_OPEN_MARKER in claudemd_text
+    assert SNIPPET_CLOSE_MARKER in claudemd_text
+    assert "@./.claude/asof-context.md" in claudemd_text
+    # The bulk-content placeholders should NOT be in CLAUDE.md anymore.
+    assert "# Project Knowledge Wiki" not in claudemd_text
+    assert "Reading order" not in claudemd_text
+
+    # asof-context.md exists at .claude/asof-context.md with the bulk body.
+    context = request.project_root / ASOF_CONTEXT_RELPATH
+    assert context.is_file()
+    context_text = context.read_text(encoding="utf-8")
+    assert "# Project Knowledge Wiki" in context_text
+    assert "myproject" in context_text  # PROJECT_SLUG substituted
+    assert str(request.layout.wiki_dir) in context_text  # WIKI_DIR substituted
 
 
-def test_snippet_appends_to_existing_claudemd(tmp_path: Path) -> None:
+def test_snippet_appends_import_to_existing_claudemd(tmp_path: Path) -> None:
+    """Existing CLAUDE.md with user content: append the marker-fenced
+    @-import block after the user's content; user content is preserved."""
     request = _build_request(tmp_path)
     target = request.project_root / "CLAUDE.md"
     target.write_text("# Existing project doc\n\nSome content here.")
     append_claudemd_snippet(request, today=TODAY, dry_run=False)
-    text = target.read_text()
-    # Existing content preserved
+    text = target.read_text(encoding="utf-8")
+    # User content preserved
     assert "Some content here." in text
-    # Snippet appended after a blank-line separator
-    assert "Some content here." in text
+    # Marker block appended (after user content)
     assert SNIPPET_OPEN_MARKER in text
-    # Snippet comes after the existing content
     assert text.index("Some content here.") < text.index(SNIPPET_OPEN_MARKER)
+    # @-import line is present in CLAUDE.md
+    assert "@./.claude/asof-context.md" in text
+    # asof-context.md still gets created
+    assert (request.project_root / ASOF_CONTEXT_RELPATH).is_file()
+
+
+def test_snippet_writes_context_first_for_atomicity(tmp_path: Path) -> None:
+    """P8 fix: asof-context.md MUST be written before CLAUDE.md. If the
+    second write somehow fails, CLAUDE.md isn't left importing a missing
+    file. Verified by checking write order via mtimes."""
+    import time
+    request = _build_request(tmp_path)
+    append_claudemd_snippet(request, today=TODAY, dry_run=False)
+    context_mtime = (request.project_root / ASOF_CONTEXT_RELPATH).stat().st_mtime
+    claudemd_mtime = (request.project_root / "CLAUDE.md").stat().st_mtime
+    # asof-context.md was written first → its mtime is ≤ CLAUDE.md's.
+    # (Some FSes have second-precision mtime; allow equality.)
+    assert context_mtime <= claudemd_mtime, (
+        f"asof-context.md must be written before CLAUDE.md (got "
+        f"context_mtime={context_mtime} > claudemd_mtime={claudemd_mtime})"
+    )
+    _ = time  # imported above; module is used implicitly via stat().st_mtime
 
 
 def test_snippet_normalizes_trailing_newlines(tmp_path: Path) -> None:

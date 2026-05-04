@@ -7,11 +7,15 @@ have opted into specific subsets.
 
 Four integrations:
 
-1. **Append CLAUDE.md snippet** — read templates/project_CLAUDE_snippet.md,
-   substitute placeholders, append to <project_root>/CLAUDE.md. The snippet
-   is marker-fenced (`<!-- asof-wiki:precedence-block -->` ...
-   `<!-- /asof-wiki:precedence-block -->`); existing blocks are detected
-   and the operation is skipped (no duplication on re-run).
+1. **Install CLAUDE.md / asof-context two-file integration** — write the
+   bulk wiki-precedence body to <project_root>/.claude/asof-context.md
+   (sync-excluded by default since `.claude/` is in DEFAULT_EXCLUDES), and
+   append a marker-fenced @-import block to <project_root>/CLAUDE.md that
+   transitively loads the bulk file via Claude Code's @-import memory
+   loader. The two-file split prevents asof's own bootstrap content from
+   being sync-mirrored into the wiki's raw/ as if it were source. Marker
+   fences (`<!-- asof-wiki:precedence-block -->` ...
+   `<!-- /asof-wiki:precedence-block -->`) make idempotent re-runs safe.
 
 2. **Install the change-reminder hook** — copy
    templates/hooks/wiki_change_reminder.py into
@@ -59,8 +63,23 @@ HOOK_MATCHER = "Write|Edit|MultiEdit|NotebookEdit"
 #: Filename written into <project>/.claude/hooks/.
 HOOK_SCRIPT_FILENAME = "asof_wiki_change_reminder.py"
 
-#: Project-CLAUDE.md template filename inside the plugin's templates/.
-CLAUDE_SNIPPET_TEMPLATE = "project_CLAUDE_snippet.md"
+#: Templates for the two-file CLAUDE.md integration (P8 fix). The bulk
+#: wiki-precedence content lives in `.claude/asof-context.md`, where it's
+#: out of sync's reach (`.claude/` is in DEFAULT_EXCLUDES); CLAUDE.md gets
+#: a 3-line marker-fenced @-import that Claude Code's session-start memory
+#: loader transitively expands. Without this split, asof's own bootstrap
+#: snippet would get sync-mirrored and ingested as if it were source content.
+#:
+#: project_CLAUDE_import.md MUST contain ONLY the marker-fenced block (no
+#: leading dev comments, no extra prose) — sync's `_is_marker_only_claudemd`
+#: regex matches the entire file body, so any extra content makes the file
+#: look "mixed" (user content + marker) and disables the auto-exclude.
+#: Dev explanation for that template lives in this module-level comment.
+ASOF_CONTEXT_TEMPLATE = "asof_context.md"
+CLAUDE_IMPORT_TEMPLATE = "project_CLAUDE_import.md"
+
+#: Path under <project_root>/ where the bulk asof-context body lives.
+ASOF_CONTEXT_RELPATH = Path(".claude") / "asof-context.md"
 
 #: Hook source filename inside the plugin's templates/hooks/.
 HOOK_SOURCE_FILENAME = "wiki_change_reminder.py"
@@ -121,46 +140,75 @@ class IntegrationResult:
 def append_claudemd_snippet(
     request: IntegrationRequest, *, today: str, dry_run: bool = False
 ) -> tuple[bool, bool]:
-    """Append the wiki-precedence snippet to <project_root>/CLAUDE.md.
+    """Install the two-file CLAUDE.md / asof-context integration.
+
+    Step 1: write the bulk wiki-precedence body to
+        <project_root>/.claude/asof-context.md
+    Step 2: write/append a marker-fenced @-import block to
+        <project_root>/CLAUDE.md
 
     Returns: (appended, skipped_already_present).
 
-    Marker-fence detection: if the file contains the open or close marker,
-    we assume the snippet (or some marker-bearing variant) is already
-    present and skip rather than risk duplicating or interleaving blocks.
+    Idempotency: if the CLAUDE.md already contains the open or close
+    marker, we skip BOTH writes — the user already has an asof block.
+
+    Atomicity: asof-context.md is written FIRST. If that write fails,
+    CLAUDE.md is not touched, so we never end up with a CLAUDE.md
+    @-importing a missing file. Both writes go through atomic_write_text
+    (temp + os.replace) individually; the function-level "atomicity"
+    here is just the write order.
+
+    Why two files: prior single-file design appended the entire bulk
+    snippet body to CLAUDE.md, which sync then mirrored into raw/ as if
+    it were source content (asof self-ingest wart). `.claude/` is in
+    sync's DEFAULT_EXCLUDES, so the bulk file there is sync-safe.
+    Claude Code's @-import loader (per memory.md docs) transitively
+    expands the @-import line at session start, giving the agent the
+    same context the bulk snippet provided.
     """
     target = request.project_root / "CLAUDE.md"
+    context_target = request.project_root / ASOF_CONTEXT_RELPATH
+
+    # Idempotency check: skip if CLAUDE.md already has either marker
+    # (covers re-runs and partial prior installs).
     if target.is_file():
         existing = target.read_text(encoding="utf-8")
         if SNIPPET_OPEN_MARKER in existing or SNIPPET_CLOSE_MARKER in existing:
             return (False, True)
 
-    rendered = render_template(
-        load_template(CLAUDE_SNIPPET_TEMPLATE),
-        {
-            "WIKI_DIR": str(request.layout.wiki_dir),
-            "PROJECT_NAME": request.project_display_name,
-            "PROJECT_SLUG": request.project_slug,
-            "TODAY": today,
-            "ASOF_VERSION": _read_skill_version_for_template(),
-        },
+    substitutions = {
+        "WIKI_DIR": str(request.layout.wiki_dir),
+        "PROJECT_NAME": request.project_display_name,
+        "PROJECT_SLUG": request.project_slug,
+        "TODAY": today,
+        "ASOF_VERSION": _read_skill_version_for_template(),
+    }
+    context_body = render_template(
+        load_template(ASOF_CONTEXT_TEMPLATE), substitutions
+    )
+    import_block = render_template(
+        load_template(CLAUDE_IMPORT_TEMPLATE), substitutions
     )
 
     if dry_run:
         return (True, False)
 
-    # Append with a single blank-line separator regardless of how the
-    # existing file ends. Round-1 phase-3 LOW: previously the code added
-    # an extra "\n" after existing content unconditionally, so a file
-    # already ending with "\n\n" produced three newlines before the
-    # snippet — visually messy in CLAUDE.md. rstrip+two-\n is canonical.
+    # Step 1: write asof-context.md FIRST. atomic_write_text creates the
+    # parent dir if needed (so .claude/ gets created here for fresh projects).
+    atomic_write_text(context_target, context_body)
+
+    # Step 2: write/append the import block to CLAUDE.md. If asof-context.md
+    # write above succeeded but this write fails, CLAUDE.md is unmodified
+    # and asof-context.md exists orphaned — re-running init will hit the
+    # idempotency check (no CLAUDE.md marker yet) and retry both writes,
+    # which is safe because atomic_write_text overwrites cleanly.
     if target.is_file():
         existing = target.read_text(encoding="utf-8")
         new_content = (
-            existing.rstrip("\n") + "\n\n" + rendered if existing else rendered
+            existing.rstrip("\n") + "\n\n" + import_block if existing else import_block
         )
     else:
-        new_content = rendered
+        new_content = import_block
     atomic_write_text(target, new_content)
     return (True, False)
 

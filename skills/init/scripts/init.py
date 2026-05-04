@@ -358,10 +358,17 @@ def _print_integration_summary(result: IntegrationResult) -> None:
             "will reject the duplicate project. Fix the underlying issue "
             "(permissions, malformed JSON, etc.) then recover by step:"
         )
+        project_root_str = (
+            str(result.settings_path.parent.parent)
+            if result.settings_path
+            else "PROJECT_ROOT"
+        )
         print(
-            "      • CLAUDE.md snippet — copy the marker-fenced block from "
-            "<plugin>/templates/project_CLAUDE_snippet.md into "
-            f"{(result.settings_path.parent.parent if result.settings_path else 'PROJECT_ROOT')}/CLAUDE.md"
+            "      • CLAUDE.md snippet — write the bulk wiki-precedence body "
+            f"to {project_root_str}/.claude/asof-context.md (copy from "
+            "<plugin>/templates/asof_context.md), then append the @-import "
+            "block from <plugin>/templates/project_CLAUDE_import.md to "
+            f"{project_root_str}/CLAUDE.md"
         )
         print(
             "      • hook install — copy <plugin>/templates/hooks/"
@@ -420,9 +427,13 @@ def _print_final_summary(
         )
     else:
         print(
-            "  • To make the agent consult the wiki automatically, append "
-            "the snippet from <plugin>/templates/project_CLAUDE_snippet.md "
-            "to your project's CLAUDE.md."
+            "  • To make the agent consult the wiki automatically: write "
+            "the bulk wiki-precedence body from <plugin>/templates/"
+            "asof_context.md to <project_root>/.claude/asof-context.md, "
+            "then append the @-import block from <plugin>/templates/"
+            "project_CLAUDE_import.md to <project_root>/CLAUDE.md. The "
+            "@-import auto-loads at session start; .claude/ is sync-excluded "
+            "so the bulk file doesn't pollute the wiki."
         )
 
 

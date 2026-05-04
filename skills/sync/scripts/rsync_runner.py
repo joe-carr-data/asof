@@ -20,12 +20,55 @@ Stdlib only (uses the system `rsync` binary).
 from __future__ import annotations
 
 import dataclasses
+import re
 import shutil
 import subprocess
 from pathlib import Path
 
 from config import MANDATORY_EXCLUDES, ConfigError, ProjectConfig
 from resolution import check_self_ingest_safe
+
+# ─── asof-precedence marker recognition ────────────────────────────────────
+#
+# `asof:init` writes a marker-fenced @-import block to `<project>/CLAUDE.md`
+# that transitively loads `<project>/.claude/asof-context.md` via Claude
+# Code's @-import memory mechanism. Sync's job is to mirror user-authored
+# *.md content into raw/, NOT asof's own bootstrap blocks. If a CLAUDE.md
+# at the source root contains ONLY the asof marker block + whitespace
+# (no user content), rsync excludes it from mirroring — otherwise the
+# wiki would have to ingest asof's own self-references as if they were
+# project source.
+#
+# Mixed CLAUDE.md (user content + the import block) is NOT excluded; the
+# user's project guidelines are real source content, and the agent is
+# expected to summarize it like any other doc.
+#
+# Pattern matches the entire file body when stripped: "<!-- asof-wiki:
+# precedence-block --> ... <!-- /asof-wiki:precedence-block -->", possibly
+# preceded/followed by whitespace.
+
+_ASOF_MARKER_ONLY_RE = re.compile(
+    r"\A\s*<!--\s*asof-wiki:precedence-block\s*-->"
+    r".*?"
+    r"<!--\s*/asof-wiki:precedence-block\s*-->\s*\Z",
+    re.DOTALL,
+)
+
+
+def _is_marker_only_claudemd(path: Path) -> bool:
+    """True if `path` is a CLAUDE.md whose entire body is the asof marker
+    block + whitespace (no user-authored content).
+
+    Returns False on any read error, on missing file, on a non-CLAUDE.md
+    name, or on any user content outside the marker fences.
+    """
+    if path.name != "CLAUDE.md" or not path.is_file():
+        return False
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return False
+    return bool(_ASOF_MARKER_ONLY_RE.match(text))
 
 # ─── data model ─────────────────────────────────────────────────────────────
 
@@ -104,6 +147,15 @@ def build_rsync_args(
         args.append("--dry-run")
     for exc in project.excludes:
         args.append(f"--exclude={exc}")
+    # Marker-only CLAUDE.md exclusion: if the source-root CLAUDE.md is just
+    # asof's own bootstrap block (the @-import that init wrote, no user
+    # content), don't sync it — otherwise the wiki ingests asof's own
+    # self-references. Mixed CLAUDE.md is NOT skipped; user project
+    # guidelines are real source content. Anchored exclude `/CLAUDE.md`
+    # only matches at the source root, so nested CLAUDE.md files (e.g.
+    # subprojects) sync normally.
+    if _is_marker_only_claudemd(project.source / "CLAUDE.md"):
+        args.append("--exclude=/CLAUDE.md")
     args.extend(["--include=*/", "--include=*.md", "--exclude=*"])
     args.append(f"{project.source!s}/")
     args.append(f"{raw_target!s}/")

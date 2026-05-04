@@ -1,17 +1,20 @@
 <!--
-This snippet is appended (not overwritten) to a user's project CLAUDE.md
-by `asof:init`. It establishes wiki-precedence — telling future Claude Code
-sessions in this project to consult the asof wiki BEFORE auto-memory or
-individual docs for synthesised claims.
+Bulk wiki-precedence content, written by `asof:init` to
+<project_root>/.claude/asof-context.md. Auto-loaded into every Claude Code
+session by the @-import line in <project_root>/CLAUDE.md (see
+project_CLAUDE_import.md template).
+
+This file lives in `.claude/` precisely because:
+  - `.claude/` is sync-excluded by default → the file never enters the wiki's
+    raw/, so asof's own bootstrap doesn't get ingested as if it were source.
+  - Claude Code's @-import resolution finds it at session start (transitively
+    loaded from the project's CLAUDE.md, per Claude Code's memory.md docs).
 
 Placeholders {{WIKI_DIR}}, {{PROJECT_SLUG}}, {{PROJECT_NAME}} are substituted
-at install time. The leading marker `<!-- asof-wiki:precedence-block -->` lets
-init detect re-runs and refuse to duplicate the section.
+at install time.
 -->
 
-<!-- asof-wiki:precedence-block -->
-
-## Project Knowledge Wiki ({{PROJECT_NAME}})
+# Project Knowledge Wiki ({{PROJECT_NAME}})
 
 **Before answering any question about project state, decisions, topology, history, or "what is X / how does X work", FIRST read `{{WIKI_DIR}}/wiki/{{PROJECT_SLUG}}/current_state.md` and `{{WIKI_DIR}}/wiki/{{PROJECT_SLUG}}/index.md`.** This is not optional — the wiki is the canonical, time-aware knowledge base for this project, and it **supersedes both auto-memory and individual `*.md` docs** for synthesised claims. Auto-memory may contain stale facts that the wiki has already superseded.
 
@@ -50,7 +53,4 @@ claude --add-dir {{WIKI_DIR}}
 **Refreshing the wiki after doc changes here:**
 
 - Say "sync the wiki" or run `/asof:sync {{PROJECT_SLUG}}` in any Claude Code session.
-- Or directly: `python3 ~/.claude/skills/asof/skills/sync/scripts/sync.py {{PROJECT_SLUG}}` (path varies by install location).
 - The sync detects new / modified / deleted `*.md` files via mtime comparison and re-ingests deltas only — newer mtimes supersede older versions of the same file with explicit "Self-supersession" notes.
-
-<!-- /asof-wiki:precedence-block -->

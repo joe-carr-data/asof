@@ -146,6 +146,79 @@ def test_args_raises_when_mandatory_excludes_missing(tmp_path: Path) -> None:
         build_rsync_args(bad, tmp_path / "raw")
 
 
+# ─── marker-only CLAUDE.md exclusion (P8 fix) ──────────────────────────────
+
+_MARKER_ONLY_CLAUDEMD = (
+    "<!-- asof-wiki:precedence-block -->\n"
+    "@./.claude/asof-context.md\n"
+    "<!-- /asof-wiki:precedence-block -->\n"
+)
+_MIXED_CLAUDEMD = (
+    "# Project guidelines\n\nReal user content.\n\n"
+    "<!-- asof-wiki:precedence-block -->\n"
+    "@./.claude/asof-context.md\n"
+    "<!-- /asof-wiki:precedence-block -->\n"
+)
+
+
+def test_args_excludes_marker_only_claudemd(tmp_path: Path) -> None:
+    """P8 fix: a CLAUDE.md whose entire body is the asof marker block (no
+    user content) is auto-excluded from rsync. Otherwise asof's own
+    bootstrap snippet would get sync-mirrored as if it were source."""
+    (tmp_path / "CLAUDE.md").write_text(_MARKER_ONLY_CLAUDEMD)
+    proj = _make_project(source=tmp_path)
+    args = build_rsync_args(proj, tmp_path / "raw")
+    assert "--exclude=/CLAUDE.md" in args
+
+
+def test_args_does_not_exclude_mixed_claudemd(tmp_path: Path) -> None:
+    """Mixed CLAUDE.md (user content + asof marker) is NOT excluded — the
+    user's project guidelines are real source content."""
+    (tmp_path / "CLAUDE.md").write_text(_MIXED_CLAUDEMD)
+    proj = _make_project(source=tmp_path)
+    args = build_rsync_args(proj, tmp_path / "raw")
+    assert "--exclude=/CLAUDE.md" not in args
+
+
+def test_args_does_not_exclude_user_authored_claudemd(tmp_path: Path) -> None:
+    """A CLAUDE.md without any asof marker is plain user content; sync it."""
+    (tmp_path / "CLAUDE.md").write_text("# My project\n\nReal content only.")
+    proj = _make_project(source=tmp_path)
+    args = build_rsync_args(proj, tmp_path / "raw")
+    assert "--exclude=/CLAUDE.md" not in args
+
+
+def test_args_no_exclude_when_no_claudemd(tmp_path: Path) -> None:
+    """Source dir without any CLAUDE.md → no extra exclude added."""
+    proj = _make_project(source=tmp_path)
+    args = build_rsync_args(proj, tmp_path / "raw")
+    assert "--exclude=/CLAUDE.md" not in args
+
+
+def test_args_marker_only_with_extra_whitespace(tmp_path: Path) -> None:
+    """Leading/trailing whitespace around the marker block doesn't count
+    as 'user content' — file is still considered marker-only."""
+    (tmp_path / "CLAUDE.md").write_text(
+        "\n\n  " + _MARKER_ONLY_CLAUDEMD + "  \n\n"
+    )
+    proj = _make_project(source=tmp_path)
+    args = build_rsync_args(proj, tmp_path / "raw")
+    assert "--exclude=/CLAUDE.md" in args
+
+
+def test_marker_only_anchored_to_source_root(tmp_path: Path) -> None:
+    """The exclude is anchored (`/CLAUDE.md`), so a nested CLAUDE.md (e.g.
+    `subproject/CLAUDE.md`) wouldn't be matched even if marker-only.
+    Only the source-root CLAUDE.md is the asof bootstrap target."""
+    (tmp_path / "subproject").mkdir()
+    (tmp_path / "subproject" / "CLAUDE.md").write_text(_MARKER_ONLY_CLAUDEMD)
+    # No CLAUDE.md at source root.
+    proj = _make_project(source=tmp_path)
+    args = build_rsync_args(proj, tmp_path / "raw")
+    # No exclude added because source-root CLAUDE.md doesn't exist.
+    assert "--exclude=/CLAUDE.md" not in args
+
+
 # ─── parse_rsync_output ─────────────────────────────────────────────────────
 
 

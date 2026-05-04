@@ -41,6 +41,7 @@ python3 ${CLAUDE_SKILL_DIR}/scripts/sync.py $ARGUMENTS
 6. **For each selected project**:
    - **Self-ingest guard**: refuse if `wiki_dir` is inside `source` and `.asof` is missing from excludes (Pattern C safety; `--allow-self` bypasses).
    - **Run rsync** with `-av --delete --prune-empty-dirs --safe-links` and per-project excludes. `--copy-links` swaps to symlink-following. `--dry-run` skips writes.
+   - **Marker-only `CLAUDE.md` auto-exclusion**: if the source-root `CLAUDE.md` contains only `asof:init`'s marker-fenced `@`-import block (no user content), rsync excludes it from mirroring. Mixed `CLAUDE.md` (user guidelines + import block) syncs normally — the user's content is real source. This prevents asof's own bootstrap snippet from being ingested as if it were project source. The check is anchored to source-root `CLAUDE.md`; nested `CLAUDE.md` files (e.g. in subprojects) sync without inspection.
    - **Detect deltas**: walk `raw/<project>/` and compare each `.md`'s mtime to the recorded `source_mtime` in `<wiki>/sources/`. Emit NEW / MODIFIED / DELETED records. `--strict-mtime` raises on regressions (recorded mtime newer than file mtime).
    - **Write `<wiki_dir>/.last-sync/<project>.json`** atomically (per-project — no clobber across projects in shared wikis).
    - **Print human report** to stdout with NEW / MODIFIED / DELETED lists (`--summary-only` collapses to counts).

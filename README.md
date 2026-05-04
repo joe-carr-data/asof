@@ -19,7 +19,7 @@ That's it. The plugin auto-discovers from `.claude-plugin/plugin.json` at the re
 /asof:init <project-name> <path-to-source-repo>
 ```
 
-A 5-stage wizard handles preflight checks (Python 3.9+, rsync), wiki layout choice, scaffolding, and integrations (CLAUDE.md snippet, change-reminder hook, settings file, optional first sync).
+A 5-stage wizard handles preflight checks (Python 3.9+, rsync), wiki layout choice, scaffolding, and integrations (CLAUDE.md `@`-import + auto-loaded `asof-context.md`, change-reminder hook, settings file, optional first sync).
 
 **Zero runtime dependencies beyond Python stdlib + rsync.** No `pip install`, no `npm i`, no `uv sync`.
 
@@ -147,7 +147,7 @@ v1 is single-user. The wiki is plain markdown in a git repo, so async PR-style c
 - Atomic writes (temp-then-rename) for every config + markdown + JSON write.
 - Non-interactive mode for CI (`--non-interactive`, `--yes`, `--dry-run`, `ASOF_NON_INTERACTIVE=1`).
 - Three example wikis lint clean from a fresh checkout on every push.
-- 595 unit + integration tests; init/sync/lint exercised as real subprocesses, with lock-contention coverage.
+- 603 unit + integration tests; init/sync/lint exercised as real subprocesses, with lock-contention coverage.
 
 ## Documentation
 
