@@ -9,6 +9,66 @@ argument-hint: "[project-name] [source-path] [--pattern A|B|C] [--wiki-dir PATH]
 
 # asof:init
 
+> ## ⚠️ AGENT CONTRACT — READ BEFORE INVOKING THE SCRIPT
+>
+> When the user invokes `/asof:init` with **any** required positional arg missing (`project_name` and/or `source_path`), you (the agent) **MUST** gather the missing values via Claude Code's `AskUserQuestion` tool — NOT via prose Q&A in the conversation.
+>
+> **REQUIRED behavior** (one batched `AskUserQuestion` call, multiple questions):
+>
+> ```
+> AskUserQuestion(questions=[
+>   {
+>     question: "What project name should I use for the asof wiki?",
+>     header: "Project name",
+>     multiSelect: false,
+>     options: [
+>       { label: "<cwd-basename> (Recommended)", description: "Slug derived from the current directory's name." },
+>       // The user types a custom name via the auto-injected "Other" option.
+>     ]
+>   },
+>   {
+>     question: "Which directory should the wiki track as its source?",
+>     header: "Source path",
+>     multiSelect: false,
+>     options: [
+>       { label: "<cwd> (Recommended)", description: "Track the whole current project tree." },
+>       // If cwd has an obvious-source subdir (docs/, src/, notes/, papers/),
+>       // add it as a second labeled option.
+>     ]
+>   },
+>   {
+>     question: "Which wiki layout pattern?",
+>     header: "Wiki layout",
+>     multiSelect: false,
+>     options: [
+>       { label: "Pattern A — shared (Recommended)", description: "Wiki at ~/.claude/asof/, multiple projects share it." },
+>       { label: "Pattern B — per-project under home", description: "Wiki at ~/.claude/asof-<project>/." },
+>       { label: "Pattern C — in-repo .asof/", description: "Wiki at <repo>/.asof/, committed alongside code." }
+>     ]
+>   },
+>   {
+>     question: "Run an initial sync after init?",
+>     header: "First sync",
+>     multiSelect: false,
+>     options: [
+>       { label: "Yes (Recommended)", description: "Mirror your sources into raw/ now." },
+>       { label: "No, I'll run /asof:sync later", description: "Skip the first sync — bootstrap only." }
+>     ]
+>   }
+> ])
+> ```
+>
+> **PROHIBITED behavior** (do NOT do this — violates the skill contract):
+>
+> - ❌ Listing options as numbered prose ("1. project_name = X? 2. source_path = Y?") and asking the user to type back.
+> - ❌ Auto-running with assumed defaults + a follow-up "say go to confirm" prose question.
+> - ❌ Doing a `--dry-run` first as a substitute for asking — the user wanted a structured choice, not a preview-then-confirm prose loop.
+> - ❌ "Two paths forward — which do you want: 1... 2..." prose menus.
+>
+> After `AskUserQuestion` returns the user's selections, invoke the script with `--non-interactive` (since you've already collected every choice) plus the chosen args. Default the un-asked integrations (hook, CLAUDE.md snippet, additional-directories) to ON; these are correct for ~99% of users and asking again is friction without value.
+>
+> **Why this is mandatory:** prose Q&A makes users type yes/no/path-strings into chat (slow, error-prone, no "Recommended" visual). `AskUserQuestion` shows a clickable list with "(Recommended)" tags accepted in one keystroke. For a one-time bootstrap action that the user will only do once per project, the structured UI is the difference between "delightful" and "ugly."
+
 Bootstrap a new asof wiki for a project. Five-stage interactive wizard backed by independent Python modules (`preflight`, `wizard`, `scaffold`, `integrations`). Designed to be deliberate (one-time per project) and idempotent (re-runs detect existing state and skip).
 
 ## How to invoke
@@ -17,23 +77,7 @@ Bootstrap a new asof wiki for a project. Five-stage interactive wizard backed by
 python3 ${CLAUDE_SKILL_DIR}/scripts/init.py $ARGUMENTS
 ```
 
-Both positional args (`project_name`, `source_path`) are required. Everything else is optional with documented defaults.
-
-### When the user invokes `/asof:init` without args
-
-**Do NOT free-form-ask the user via prose.** Use Claude Code's `AskUserQuestion` tool to present a structured, click-to-select interface for the missing inputs. Run them as one batched call (multiple questions in a single tool use). Suggested questions and defaults:
-
-1. **project_name** — open input via "Other"; pre-suggest the cwd basename (`Path.cwd().name`) as the recommended default. Slugify-friendly form (lowercase, dashes for spaces) is preferred.
-2. **source_path** — open input via "Other"; pre-suggest `Path.cwd()` as the recommended default. If cwd has an obvious-source subdir (`docs/`, `src/`, `notes/`, `papers/`), offer that as a second labeled option.
-3. **pattern** — single-select with three options:
-   - `Pattern A — shared wiki at ~/.claude/asof/ (Recommended)` — best for solo users with multiple projects.
-   - `Pattern B — per-project wiki under home` — strict per-project isolation.
-   - `Pattern C — wiki inside the source repo at <repo>/.asof/` — for teams + open source; wiki travels with git.
-4. **first sync** — single-select: `Run a first sync now (Recommended)` / `Skip the first sync — I'll run /asof:sync later`.
-
-After collecting answers, run the script with `--non-interactive` (since the agent already gathered every choice) plus the user's selections. Default the rest of the integrations (hook, CLAUDE.md snippet, additional-directories) to ON unless the user explicitly opted out — these defaults are correct for ~99% of users and asking again would just add friction.
-
-The structured UI matters: free-form prose Q&A means the user types yes/no/path-strings into chat, which is slow, error-prone, and doesn't surface the recommended default visually. `AskUserQuestion` shows a clickable list with "(Recommended)" tags users can accept in one click.
+Both positional args (`project_name`, `source_path`) are required. Everything else is optional with documented defaults. **If args are missing, follow the AGENT CONTRACT above before running the script.**
 
 ## What the script does, in five stages
 

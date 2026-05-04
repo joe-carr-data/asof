@@ -8,9 +8,35 @@ argument-hint: "[project-name (optional)] [--all] [--dry-run] [--summary-only] [
 
 # asof:sync
 
+> ## ⚠️ AGENT CONTRACT — READ BEFORE STARTING THE INGEST
+>
+> The script does the rsync mirror + delta detection. **You (the agent) own the wiki ingest** that follows: writing source-summaries, updating `index.md`, appending to `log.md`, etc. For non-trivial delta counts that means many tool calls.
+>
+> When the script reports any deltas (NEW / MODIFIED / DELETED), you **MUST** decide the ingest strategy via `AskUserQuestion` — not via prose Q&A. Match the question to the delta count.
+>
+> | Delta count | Required behavior |
+> |---|---|
+> | 0 | No question. Print "wiki is up to date" and stop. |
+> | 1 | No question. Just ingest the single delta. |
+> | 2–5 | One `AskUserQuestion`: `Process all N now (Recommended)` / `Preview diff first` / `Skip ingest`. |
+> | 6–20 | One `AskUserQuestion`: `Process all N now (Recommended)` / `Pause every 10` / `Preview first 3 then continue` / `Skip ingest`. |
+> | 20+ | One `AskUserQuestion`: `Process all N now` / `Pause every 25 (Recommended)` / `Batch by source subdir` / `One at a time — I want to read each` / `Skip ingest`. |
+>
+> **PROHIBITED behavior** (do NOT do this — violates the skill contract):
+>
+> - ❌ Free-form prose: "I found 50 new files. Want me to ingest them all now? Or one at a time?"
+> - ❌ Silent autonomous run through 50 files without any checkpoint when the user picked "pause every 10".
+> - ❌ Mid-ingest prose check-ins ("Should I keep going?") instead of `AskUserQuestion`.
+>
+> **During paused ingests:** if the user selected "Pause every N", invoke `AskUserQuestion` at every checkpoint with: `Continue with the next batch (Recommended)` / `Stop here, I'll review what's done so far` / `Switch to one-at-a-time mode`.
+>
+> **DELETED handling specifically:** these are SCHEMA §6.5 "removed_upstream" cases — mark the source-summary with `removed_upstream: <today>` rather than deleting the page. For 3+ deletions, fire a separate `AskUserQuestion`: `Mark all N as removed_upstream (Recommended)` / `Review each one — some may have been moved` / `Skip`.
+>
+> **Why this is mandatory:** at scale the user is delegating a long autonomous run. They need to see "(Recommended)" tags up front and click in one keystroke, not scroll through prose. Structured questions also make checkpoints meaningful — the user can stop or change strategy at any pause without typing exact phrases.
+
 Mirror source repo `*.md` files into the wiki's `raw/` directory and detect deltas (NEW / MODIFIED / DELETED) for the agent to re-ingest into the wiki.
 
-This skill **does not modify the wiki itself** — only the `raw/` mirror and per-project `.last-sync/<project>.json` reports. Wiki updates are the agent's job, following the procedure in [references/INGEST_PROCEDURE.md](../../references/INGEST_PROCEDURE.md) (phase 2).
+This skill **does not modify the wiki itself** — only the `raw/` mirror and per-project `.last-sync/<project>.json` reports. Wiki updates are the agent's job, following the procedure in [references/INGEST_PROCEDURE.md](../../references/INGEST_PROCEDURE.md) (phase 2) AND the AGENT CONTRACT above.
 
 ## How to invoke
 
@@ -22,21 +48,7 @@ python3 ${CLAUDE_SKILL_DIR}/scripts/sync.py $ARGUMENTS
 
 ### After sync reports deltas: the ingest UX
 
-This skill prints a NEW / MODIFIED / DELETED report — but **the agent owns the wiki ingest**, not the script. After sync exits, you (the agent) walk the deltas and write source-summaries, update bookkeeping pages, etc. The UX for this varies wildly with delta count, so:
-
-**Do NOT free-form-ask the user via prose** ("Want me to ingest now?"). Use Claude Code's `AskUserQuestion` tool to present a structured, click-to-select interface. Match the question to the delta scale:
-
-- **0 deltas** — nothing to do; print "wiki is up to date" and exit.
-- **1 delta** — just ingest it (single file, no confirmation needed).
-- **2–5 deltas** — one AskUserQuestion: `Process all N now (Recommended)` / `Preview diff first, then I'll confirm` / `Skip ingest — I'll handle it later`.
-- **6–20 deltas** — one AskUserQuestion: `Process all N now (Recommended)` / `Pause every 10 files for confirmation` / `Preview the first 3, then continue` / `Skip ingest`.
-- **20+ deltas** — one AskUserQuestion: `Process all N now` / `Pause every 25 files (Recommended)` / `Batch by source subdirectory` / `One at a time — I want to read each` / `Skip ingest`.
-
-**Why structured matters:** for large ingests the user is delegating a long autonomous run. They need to see "Recommended" tags up front, not scroll through prose to figure out what you're proposing. Structured questions also let them click "Recommended" in one keystroke instead of typing `yes` 50 times.
-
-**During the ingest itself:** if you opted into "Pause every N", actually pause — invoke `AskUserQuestion` again at each checkpoint (`Continue with the next batch (Recommended)` / `Stop here, I'll review what's done so far` / `Switch to one-at-a-time mode`). Don't pretend to pause and then keep going — that defeats the user's choice.
-
-**For DELETED deltas specifically:** these are SCHEMA §6.5 "removed_upstream" cases. Mark the existing source-summary with `removed_upstream: <today>` rather than deleting the page. One AskUserQuestion if there are 3+ deletions: `Mark all N as removed_upstream (Recommended)` / `Review each one — some may have been moved, not deleted` / `Skip`.
+See the AGENT CONTRACT at the top of this file for the required `AskUserQuestion` flow scaled by delta count. The contract is mandatory; this section is just a pointer.
 
 ## What the script does, in order
 
