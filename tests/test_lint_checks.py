@@ -373,6 +373,35 @@ def test_removed_source_no_marker_no_finding(tmp_path: Path) -> None:
     assert findings == []
 
 
+def test_removed_source_dated_marker_fires(tmp_path: Path) -> None:
+    """Codex round-2 phase-4 HIGH: SCHEMA's canonical marker is dated
+    (`<!-- backing source removed: 2026-04-26 -->`). Round-1 code only
+    matched the undated form, so schema-conformant pages slipped past."""
+    page = _make_page(
+        tmp_path,
+        "sources/x.md",
+        "---\ntitle: T\ntype: source-summary\nproject: p\nlast_updated: 2026-04-26\n---\n"
+        "Body line.\n<!-- backing source removed: 2026-04-26 -->\nMore.\n",
+    )
+    findings = check_removed_source([page], _make_ctx(tmp_path))
+    assert len(findings) == 1
+    assert findings[0].check == "removed-source"
+    assert findings[0].severity == Severity.WARN
+
+
+def test_removed_source_marker_whitespace_tolerant(tmp_path: Path) -> None:
+    """Marker regex is whitespace- and case-tolerant so minor formatting
+    quirks don't silently bypass the WARN."""
+    page = _make_page(
+        tmp_path,
+        "sources/x.md",
+        "---\ntitle: T\ntype: source-summary\nproject: p\nlast_updated: 2026-04-26\n---\n"
+        "<!--   Backing Source Removed  :  2026-04-26   -->\n",
+    )
+    findings = check_removed_source([page], _make_ctx(tmp_path))
+    assert len(findings) == 1
+
+
 # ─── 5. mtime drift ────────────────────────────────────────────────────────
 
 

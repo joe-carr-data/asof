@@ -28,8 +28,17 @@ REQUIRED_FIELDS: tuple[str, ...] = ("title", "type", "project", "last_updated")
 # with both `path` and `source_mtime`.
 SOURCE_SUMMARY_TYPE = "source-summary"
 
-# Removed-source marker per SCHEMA.md §6.4.
-REMOVED_SOURCE_MARKER = "<!-- backing source removed -->"
+# Removed-source marker per SCHEMA.md §6.4. Matches both the undated form
+# and the canonical dated form (SCHEMA.md line 213):
+#     <!-- backing source removed -->
+#     <!-- backing source removed: 2026-04-26 -->
+# Codex round-2 phase-4 HIGH: previous code matched only the undated
+# substring, so pages following the schema template (which uses the
+# dated form) silently bypassed the WARN.
+_REMOVED_SOURCE_RE = re.compile(
+    r"<!--\s*backing\s+source\s+removed(?:\s*:\s*\d{4}-\d{2}-\d{2})?\s*-->",
+    re.IGNORECASE,
+)
 
 # Supersession-note pattern. SCHEMA documents either an explicit "Self-supersession"
 # header or "Previously X — superseded by Y" prose. We're forgiving: any of these
@@ -424,10 +433,11 @@ def check_removed_source(
     """
     findings: list[Finding] = []
     for page in pages:
-        if REMOVED_SOURCE_MARKER not in page.body:
+        match = _REMOVED_SOURCE_RE.search(page.body)
+        if match is None:
             continue
         # Find the line within the body for the finding.
-        body_offset_idx = page.body.find(REMOVED_SOURCE_MARKER)
+        body_offset_idx = match.start()
         body_line_offset = page.body[:body_offset_idx].count("\n") + 1
         # Body starts after the closing `---` fence. Compute the absolute
         # line by counting frontmatter lines + 1 for the closing fence.
