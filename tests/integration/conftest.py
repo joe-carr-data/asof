@@ -27,6 +27,15 @@ SCRIPTS_BY_SKILL: dict[str, Path] = {
     "lint": REPO_ROOT / "skills" / "lint" / "scripts" / "lint.py",
 }
 
+#: Env vars that asof's skills read from the parent environment. Stripped
+#: by default in `run_skill()` so tests are hermetic — a developer with
+#: ASOF_DIR set in their shell would otherwise leak it into every child
+#: process and break cwd-resolution tests. Codex round-1 phase-5 HIGH.
+_ASOF_ENV_VARS: tuple[str, ...] = (
+    "ASOF_DIR",
+    "ASOF_SKILL_VERSION_OVERRIDE",
+)
+
 
 @dataclasses.dataclass(frozen=True)
 class SkillResult:
@@ -69,7 +78,15 @@ def run_skill(
             f"unknown skill {skill!r}; expected one of {list(SCRIPTS_BY_SKILL)}"
         )
     script = SCRIPTS_BY_SKILL[skill]
+    # Inherit parent env, then SCRUB asof-specific vars so a developer
+    # shell with ASOF_DIR set doesn't pollute the subprocess. Tests that
+    # explicitly want to set ASOF_DIR pass it via `env=`; an empty string
+    # is preserved (sync's resolver treats "" as "not set" via truthy
+    # check, which is documented behavior we exercise in the resolution
+    # tests). Codex round-1 phase-5 HIGH.
     full_env = dict(os.environ)
+    for var in _ASOF_ENV_VARS:
+        full_env.pop(var, None)
     if env is not None:
         full_env.update({k: str(v) for k, v in env.items()})
     proc = subprocess.run(

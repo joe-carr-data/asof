@@ -781,9 +781,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: python3 skills/lint/scripts/lint.py --wiki-dir examples/codebase-wiki --fail-on-warn
-      - run: python3 skills/lint/scripts/lint.py --wiki-dir examples/research-wiki --fail-on-warn
-      - run: python3 skills/lint/scripts/lint.py --wiki-dir examples/book-wiki --fail-on-warn
+      - run: python3 skills/lint/scripts/lint.py --wiki-dir examples/codebase-wiki --severity warn
+      - run: python3 skills/lint/scripts/lint.py --wiki-dir examples/research-wiki --severity warn
+      - run: python3 skills/lint/scripts/lint.py --wiki-dir examples/book-wiki --severity warn
 
   schema-bump-gate:
     runs-on: ubuntu-latest

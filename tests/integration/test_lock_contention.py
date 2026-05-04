@@ -34,8 +34,13 @@ def _hold_lock_in_background(
     """Spawn a python subprocess that grabs the lock and sleeps.
 
     Uses sync's file_lock helper so the test exercises the same lock
-    semantics lint and sync use. Returns the Popen handle so the test
-    can wait()/terminate() it.
+    semantics lint and sync use. Caller MUST consume the readiness
+    handshake via `_wait_for_lock_held(holder)` before launching the
+    contending skill — otherwise on slow runners the contender can
+    start before the helper actually owns the lock. Codex round-1
+    phase-5 MEDIUM.
+
+    Returns the Popen handle so the test can wait()/terminate() it.
     """
     sync_scripts = Path(__file__).resolve().parents[2] / "skills" / "sync" / "scripts"
     code = (
@@ -43,13 +48,44 @@ def _hold_lock_in_background(
         f"sys.path.insert(0, {str(sync_scripts)!r});\n"
         "from utils import file_lock;\n"
         f"with file_lock({str(lock_path)!r}):\n"
+        "    sys.stdout.write('locked\\n')\n"
+        "    sys.stdout.flush()\n"
         f"    time.sleep({hold_seconds})\n"
     )
     return subprocess.Popen(
         [sys.executable, "-c", code],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1,  # line-buffered so the readiness signal arrives promptly
     )
+
+
+def _wait_for_lock_held(holder: subprocess.Popen, timeout: float = 5.0) -> None:
+    """Block until the holder subprocess emits its `locked\n` signal.
+
+    Reads one line from the holder's stdout; raises TimeoutError if the
+    helper crashes before signalling or never starts. This replaces the
+    fragile `time.sleep(0.2)` proxy that races on slow runners.
+    """
+    deadline = time.monotonic() + timeout
+    assert holder.stdout is not None  # type-checker placation; PIPE was set
+    while True:
+        if time.monotonic() > deadline:
+            holder.kill()
+            raise TimeoutError(
+                f"lock-holder subprocess never emitted 'locked' within {timeout}s"
+            )
+        # readline is blocking but bounded by the deadline check above.
+        line = holder.stdout.readline()
+        if line.strip() == "locked":
+            return
+        if not line and holder.poll() is not None:
+            stderr = holder.stderr.read() if holder.stderr else ""
+            raise RuntimeError(
+                f"lock-holder exited (code {holder.returncode}) before "
+                f"acquiring lock; stderr: {stderr!r}"
+            )
 
 
 # ─── lint queues behind a held lock ───────────────────────────────────────
@@ -67,8 +103,7 @@ def test_lint_queues_when_lock_held(pattern_a_wiki: Path) -> None:
     hold_seconds = 1.0
     holder = _hold_lock_in_background(lock_path, hold_seconds)
     try:
-        # Give the holder a moment to acquire before lint starts racing.
-        time.sleep(0.2)
+        _wait_for_lock_held(holder)
         start = time.monotonic()
         result = run_skill(
             "lint", ["--wiki-dir", str(pattern_a_wiki)], timeout=10.0
@@ -77,8 +112,8 @@ def test_lint_queues_when_lock_held(pattern_a_wiki: Path) -> None:
     finally:
         holder.wait()
     assert result.returncode == 0, result.stderr
-    # Should have waited at least until the holder's hold expired.
-    # Subtract the 0.2s we slept before timing started.
+    # Once the readiness signal fires, the lock is held; lint must wait
+    # roughly the full hold_seconds. 0.3s grace covers scheduler jitter.
     assert elapsed >= hold_seconds - 0.3, (
         f"lint completed in {elapsed:.2f}s; expected ≥ {hold_seconds - 0.3:.2f}s "
         "(suggesting it didn't actually wait for the lock)"
@@ -97,7 +132,7 @@ def test_sync_queues_when_lock_held(
     lock_path = pattern_a_wiki / ".asof.lock"
     holder = _hold_lock_in_background(lock_path, 0.8)
     try:
-        time.sleep(0.2)
+        _wait_for_lock_held(holder)
         start = time.monotonic()
         result = run_skill(
             "sync",
@@ -148,7 +183,7 @@ def test_lint_fix_acquires_lock_for_writes(
     lock_path = pattern_a_wiki / ".asof.lock"
     holder = _hold_lock_in_background(lock_path, 0.8)
     try:
-        time.sleep(0.2)
+        _wait_for_lock_held(holder)
         start = time.monotonic()
         result = run_skill(
             "lint", ["--wiki-dir", str(pattern_a_wiki), "--fix"], timeout=10.0
@@ -156,9 +191,16 @@ def test_lint_fix_acquires_lock_for_writes(
         elapsed = time.monotonic() - start
     finally:
         holder.wait()
-    # --fix exit-code logic: 0 if no findings, else 1 (and 3 if any
-    # fixable finding was refused).
-    assert result.returncode in (0, 1, 3), result.stderr
+    # The orphan IS auto-fixable (page has parseable title + type +
+    # project, index.md has ## Entities section), so no refusals are
+    # expected. Codex round-1 phase-5 LOW: previously this test allowed
+    # exit 3, which would have hidden a fix-path regression. Tighten:
+    # 0 (no findings remained after the fix) or 1 (the orphan finding
+    # itself reported but applied) are valid; 3 (refused fix) is NOT.
+    assert result.returncode != 3, (
+        f"unexpected refused fix; stderr: {result.stderr}"
+    )
+    assert result.returncode in (0, 1), result.stderr
     assert elapsed >= 0.5
     # Verify the fix actually landed (orphan got linked into index.md).
     index = (project_dir / "index.md").read_text(encoding="utf-8")
@@ -175,7 +217,7 @@ def test_non_blocking_lock_raises_when_held(pattern_a_wiki: Path) -> None:
     lock_path = pattern_a_wiki / ".asof.lock"
     holder = _hold_lock_in_background(lock_path, 0.5)
     try:
-        time.sleep(0.2)
+        _wait_for_lock_held(holder)
         # Acquire non-blocking from THIS process — should raise.
         sync_scripts = Path(__file__).resolve().parents[2] / "skills" / "sync" / "scripts"
         sys.path.insert(0, str(sync_scripts))
