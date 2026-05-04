@@ -367,12 +367,12 @@ The threshold is configurable per wiki via `lint_thresholds.candidate_promotion_
 | 1 | **Mtime drift** — `last_updated` more than N days older than newest cited `source_mtime` | 30 days | warning |
 | 2 | **Supersession gap** — page cites two sources whose `source_mtime` differ by N+ days with no supersession note in body | 60 days | warning |
 | 3 | **Missing mtime** — source-summary frontmatter without `source_mtime` | n/a | error (data quality) |
-| 4 | **Orphan pages** — pages with no inbound link from `index.md` or any other wiki page | n/a | warning |
-| 5 | **Removed-source claims** — pages with `<!-- backing source removed -->` markers | n/a | info (surface for triage) |
+| 4 | **Orphan pages** — pages with no inbound link from `index.md` or any other wiki page | n/a | info |
+| 5 | **Removed-source claims** — pages with `<!-- backing source removed -->` markers | n/a | warning (review dependent pages) |
 | 6 | **Path mismatch** — source-summary's `path:` does not exist under `raw/` AND `removed_upstream:` is not set | n/a | error (data quality) |
 | 7 | **Frontmatter validity** — missing required fields (`title`, `type`, `last_updated`) | n/a | error (schema violation) |
 
-`--fix` rewrites the safe ones (rule 1 by bumping `last_updated`; rule 4 by adding missing `index.md` entries). Never touches page content.
+`--fix` is narrow — only two unambiguous cases (per PLAN §6.3): rule 7 inserts today's date when `last_updated` is *missing entirely* (refuses to overwrite a stale-but-present value, which would lie about edit recency); rule 4 appends `- [Title](path.md)` entries to `index.md` under the matching `## <type>` section. All other findings are report-only.
 
 In **read-only mode** (compat-matrix cell b), `asof:lint --fix` is rejected — lint runs report-only.
 

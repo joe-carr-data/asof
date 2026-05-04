@@ -1,136 +1,151 @@
 # asof
 
-**A time-aware wiki for Claude Code.** Older claims age, newer ones supersede, the wiki tells you what's true *as of now*.
+**Claude writes notes that read as "now". `asof` tags them with mtimes so older claims stop pretending to be current.**
 
-<!-- TODO(phase 7): replace with asciinema cast at docs/demo.cast — 30-second init → sync → supersession-in-action loop -->
-> **Demo:** screenshots and a 30-second cast land with the v1.0 release. For now, see [PLAN.md](PLAN.md) for the full design or [`examples/`](examples/) for sample wikis.
+A Claude Code plugin that gives the agent a sense of time across your project's docs. Source markdown files get rsync-mirrored into a wiki; an LLM-maintained synthesis under `wiki/` records *when* each claim was true, with explicit supersession when newer sources contradict older ones.
 
-## Install in one command
+## Install
+
+`asof` ships as a Claude Code plugin. The recommended path is whatever the current Claude Code release documents for plugin install (the marketplace flow is the official channel; see [Claude Code's plugin docs](https://docs.claude.com/en/docs/claude-code/plugins) for the current command).
+
+For a manual install against the working tree, clone into the directory Claude Code searches for plugins:
 
 ```bash
-git clone https://github.com/<your-org>/asof ~/.claude/skills/asof
+git clone https://github.com/joe-carr-data/asof ~/.claude/plugins/asof
 ```
 
-Then type `/asof:init` in any Claude Code session — a guided wizard handles the rest.
+Then in any Claude Code session:
 
-> **Plugin marketplace install** (`claude plugin install asof@<marketplace>`) lands when `asof` is published to a marketplace. The manual `git clone` above works on every Claude Code version today.
+```
+/asof:init <project-name> <path-to-source-repo>
+```
 
-## What you get
+A 5-stage wizard handles preflight checks (Python 3.9+, rsync), wiki layout choice, scaffolding, and integrations (CLAUDE.md snippet, change-reminder hook, settings file, optional first sync).
 
-- **Time-aware.** Every wiki claim is tagged with the source's mtime; newer sources supersede older ones automatically and the supersession is recorded, not silently overwritten.
-- **Self-correcting.** The agent re-ingests deltas (new / modified / deleted source files) using documented rules. Stale claims get flagged and updated; deleted sources don't disappear silently — they're marked `removed_upstream:` so the history stays intact.
-- **Multi-project.** One wiki dir holds N projects with hard subdirectory isolation, or one wiki per repo if you prefer (Pattern C — wiki travels with the code).
+**Zero runtime dependencies beyond Python stdlib + rsync.** No `pip install`, no `npm i`, no `uv sync`.
+
+> If `/asof:init` doesn't appear in your slash-command list after install, your Claude Code build may use a different plugin directory. Run `/help` to see your loaded skills, or check the official plugin docs linked above for the install path your release expects.
 
 ## Why this exists
 
-Most LLM-doc setups look like RAG: upload a pile of files, retrieve relevant chunks at query time, generate an answer. The LLM rediscovers knowledge from scratch on every question. Nothing accumulates.
+Claude-written notes always sound final at writing time. A page edited last March may state "we use Postgres 14" with the same authority as a page edited yesterday — but only one of them reflects current reality. The agent has no built-in sense of which is which.
 
-`asof` is different. The agent **incrementally builds and maintains a wiki** — markdown files between you and the raw sources, owned and updated by the LLM. Add a new source, the agent integrates it: updates entity pages, revises summaries, flags contradictions with the *date* of each claim. The synthesis already reflects everything you've read. Older facts age; newer ones supersede; the wiki keeps getting richer with every source.
+`asof` fixes that by recording, in every wiki page's frontmatter:
 
-The compounding artifact is the point. Cross-references already there. Contradictions already flagged. Synthesis already done.
+- the source file's `source_mtime` (when the underlying doc was last touched)
+- when the wiki page itself was `last_updated`
+- which sources, with which mtimes, this page's claims are based on
 
-## 5-minute tour
+When a newer source contradicts an older one, the wiki records an explicit **supersession note** (e.g. "previously X — superseded by Y per source_mtime 2026-04-22"). Old claims aren't deleted; they're tagged stale, with the date attached. The agent reads the wiki on every project question and trusts the freshest claim.
 
-```
-/asof:init <project-name> <source-path>
-```
-Walks you through preflight checks (Python? rsync? Obsidian?), wiki layout choice (shared / per-project / inside-repo), and integrations. Runs once per project.
-
-```
-/asof:sync <project-name>
-```
-Mirrors `*.md` files from your repo into the wiki's `raw/` dir. Detects what changed (NEW / MODIFIED / DELETED). The agent re-ingests the deltas with you reading the diff.
+## The three skills
 
 ```
-/asof:lint
+/asof:init <project> <source>     # one-time bootstrap, 5-stage wizard
+/asof:sync [project]              # mirror sources into raw/, detect deltas (NEW/MODIFIED/DELETED)
+/asof:lint [project] [--fix]      # audit: stale claims, missing supersessions, orphan pages, broken paths
 ```
-Audits the wiki for stale claims, missing supersession notes, orphan pages, broken source paths. Optional `--fix` for safe repairs.
 
-## Three layouts, pick one (or let `init` ask you)
+`init` runs once per project. `sync` runs whenever your source docs change. `lint` runs on demand or in CI.
 
-**Pattern A — shared wiki, multiple projects.** One vault at `~/.claude/asof/` with subdirectories per project. Open in Obsidian, browse everything. Recommended for solo users with multiple related projects.
+## Three layouts (`init` asks, defaults to A)
 
-**Pattern B — one wiki per project.** Each project gets its own dir under home (e.g. `~/.claude/asof-work/`). Stricter visual isolation; one Obsidian vault per project.
+| Pattern | Wiki location | Best for |
+|---|---|---|
+| **A** | `~/.claude/asof/` (shared) | Solo users with multiple projects |
+| **B** | `~/.claude/asof-<project>/` (per-project under home) | Strict project isolation |
+| **C** | `<repo>/.asof/` (in the source repo) | Teams + open source — wiki travels with the code via git |
 
-**Pattern C — wiki inside the source repo.** Wiki at `<repo>/.asof/`, committed alongside code, travels with the repo via git. Recommended for teams and open-source projects. The wiki is a public artifact your collaborators get for free with `git pull`.
+## Examples
 
-`init` walks you through the choice. The default is A.
+Three Pattern C example wikis live under [`examples/`](examples/):
+
+- [`examples/codebase-wiki/`](examples/codebase-wiki/) — `tinyapp` CLI demo. Source-summary + entity + concept cross-references.
+- [`examples/research-wiki/`](examples/research-wiki/) — Kaplan 2020 → Hoffmann 2022 (Chinchilla) scaling-law papers. **Demonstrates cross-source supersession** with a 26-month mtime gap.
+- [`examples/book-wiki/`](examples/book-wiki/) — Kahneman, *Thinking, Fast and Slow*. Aliased entities (System 1, System 2) + concept (Cognitive ease).
+
+CI lints all three on every push (`.github/workflows/lint-examples.yml`), so they stay portable across forks and clones.
+
+## Pattern C and `.asof/raw/`
+
+If you copy an example as a template, **read this first.** Pattern C wikis (`<repo>/.asof/`) treat `raw/` as regenerable working state — `init` writes a `.gitignore` block excluding `.asof/raw/`, `.asof/.last-sync/`, and the lock file. `/asof:sync` recreates `raw/` from your sources whenever needed.
+
+The **shipped examples do the opposite**: each example's `.gitignore` has the `.asof/raw/` line commented out (with an inline note pointing to it), and `raw/` is committed. This is deliberate — CI and a fresh-checkout `/asof:lint` need the raw files to validate `sources[].path` references.
+
+When you derive your own wiki from an example, uncomment the `.asof/raw/` line in `.gitignore` immediately. Otherwise you'll commit a regenerable working tree to your repo. The line is fenced inside the `# asof-wiki:gitignore` markers, so the diff is one line.
 
 ## Requirements
 
 | Component | Required? | Why |
 |---|---|---|
-| **Python 3.9+** | Required | All helper scripts |
-| **`rsync`** | Required | Source → raw mirroring |
-| **Claude Code** | Required | The skill runtime |
-| **`git`** | Recommended | Versioning the wiki, especially Pattern C |
-| **Obsidian** | Optional | Best UX for browsing the wiki — graph view, backlinks, frontmatter queries |
+| Python 3.9+ | Required | All helper scripts (stdlib only) |
+| `rsync` | Required | Source → raw mirroring (used by `asof:sync`) |
+| Claude Code | Required | The skill runtime |
+| `git` | Recommended | Versioning the wiki, especially Pattern C |
+| Obsidian | Optional | Best UX for browsing — graph view, backlinks, frontmatter queries |
 
-**Zero Python deps. Zero Node deps. One Python script per skill, all stdlib.** No `pip install`, no `npm i`, no `uv`. If you have Python 3.9+ and rsync, you're done.
+## How sync works
 
-## What happens during a sync
+1. `rsync` mirrors `*.md` files from `<source>` into `<wiki_dir>/raw/<project>/`.
+2. The skill compares each raw file's mtime against any existing source-summary's `source_mtime` and classifies deltas:
+   - **NEW** — file in `raw/`, no source-summary yet → agent writes one
+   - **MODIFIED** — `source_mtime` changed → agent updates the summary, adds a self-supersession note
+   - **DELETED** — source-summary cites a path no longer in `raw/` → agent marks it `removed_upstream:`, page survives as historical record
+3. The agent presents the diff. You approve. Bookkeeping (`index.md`, `log.md`, `_candidates.md`) updates.
 
-1. `rsync` mirrors `*.md` files from your `source` repo into `<wiki_dir>/raw/<project>/`.
-2. Helper script reads existing wiki source-summaries, extracts each one's `source_mtime`, and detects deltas:
-   - **NEW** — file in `raw/` but no source-summary yet
-   - **MODIFIED** — source-summary's `source_mtime` ≠ current file mtime
-   - **DELETED** — source-summary cites a path no longer in `raw/`
-3. The agent re-ingests deltas with you. NEW files get summarized + linked into entity / concept pages. MODIFIED files get a self-supersession note. DELETED files get marked `removed_upstream:` (the source-summary stays — history is preserved).
-4. Bookkeeping: `index.md`, `log.md`, and `_candidates.md` get appended.
+The agent never silently overwrites a claim. Supersessions are explicit. `fcntl.flock` on `<wiki_dir>/.asof.lock` prevents concurrent corruption.
 
-**You read the diff and approve.** The agent doesn't write to the wiki without you watching the first time, and never silently overwrites an existing claim — supersession is always recorded.
+## What lint checks
 
-## Why not RAG?
+7 checks, exit code maps cleanly for CI:
 
-RAG re-derives synthesis on every query. Ten queries that all touch the same five sources = ten rounds of "find chunks, piece them together, generate answer." The synthesis is ephemeral.
+| Check | Severity | Detects |
+|---|---|---|
+| frontmatter | ERROR | Missing required fields, unparseable ISO dates, source-summary contract violations |
+| path-mismatch | ERROR | `sources[].path` doesn't exist (or escapes the project's `raw/`) |
+| missing-mtime | ERROR | Source entries lacking `source_mtime` |
+| removed-source | WARN | Pages with `<!-- backing source removed -->` markers |
+| mtime-drift | WARN | Page `last_updated` more than 30 days behind its newest source |
+| supersession-gap | WARN | Page cites sources spanning 60+ days with no supersession note |
+| orphan-page | INFO | Pages with no inbound link from `index.md` or other pages |
 
-`asof` does the synthesis once (when a source is ingested) and **caches it as a wiki page**. Subsequent queries read the wiki, not the raw sources. Cross-references already there. Contradictions already flagged. The wiki compounds; RAG doesn't.
+Two narrow `--fix` cases: insert today's date when `last_updated` is *missing entirely* (refuses to overwrite stale-but-present), and append orphan-page entries to `index.md`. Everything else is report-only.
 
-## Does it work for non-code projects?
+For CI: pin `--severity warn` so orphan-page INFO findings don't gate merges.
 
-Yes. The schema is domain-agnostic. See [`examples/`](examples/):
+## Schema-version compatibility
 
-- `codebase-wiki/` — fictional codebase being documented over time
-- `research-wiki/` — research topic with papers, articles, evolving thesis
-- `book-wiki/` — fan-wiki style ingest of a novel
+Two version axes: the **skill version** in `.claude-plugin/plugin.json` (tracks the code, what `git tag` points at) and the **schema version** in `<wiki_dir>/.asof.json` (tracks the wiki format). Each wiki also pins `min_reader_version` and `min_writer_version` so a wiki written by a newer skill can still be read by an older one within the supported window.
 
-Each example has 3-5 source `.md` files plus the resulting wiki, lint-clean.
+| Skill version vs wiki floors | `sync` / `lint --fix` / `migrate` | `lint` (read-only) |
+|---|---|---|
+| `< min_reader_version` | refuse, upgrade required | refuse |
+| `min_reader ≤ skill < min_writer` | refuse with read-only message | allowed |
+| `≥ min_writer`, schema match | allowed | allowed |
+| `≥ min_writer`, wiki schema older | require explicit `--migrate` (with backup) | allowed |
 
-## Codex / OpenCode compatibility
+Migrations are never silent. See [`CHANGELOG.md`](CHANGELOG.md) for the full semantics and migration procedure.
 
-Claude Code's skill format follows the [Agent Skills open standard](https://agentskills.io) (per the [official Claude Code skills documentation](https://code.claude.com/docs/en/skills)). `asof` is intended to be compatible with any compliant tool. Verified for Claude Code; spot-checked for others per release.
+## Multi-user
 
-## Multi-user collaboration
-
-v1 is single-user. The wiki is plain markdown in a git repo, so async collaboration via PRs works fine. Concurrent live editing from two Claude Code sessions on the same wiki dir is **not** supported — you get a file lock collision, the second session waits.
-
-## Migrating from `brain-sync`
-
-If you're already running the prototype `~/.claude/skills/brain-sync/` skill with `~/Desktop/Brain/`:
-
-```
-/asof:init --import-existing ~/Desktop/Brain/
-```
-
-Reads your existing `.brain-sync.json`, copies the project list to `.asof.json`, preserves all wiki pages, writes the schema-version field. Old `brain-sync` keeps working until you're satisfied; delete it once verified.
+v1 is single-user. The wiki is plain markdown in a git repo, so async PR-style collaboration works fine. Concurrent live editing from two Claude Code sessions on the same wiki dir is **not** supported — `fcntl.flock` makes the second session wait, no corruption.
 
 ## Production-readiness
 
-`asof` ships with:
+- Self-ingest hard guard for Pattern C (sync refuses to recurse into its own wiki dir).
+- `Path.resolve()` containment checks before every write.
+- rsync `--safe-links` by default (path-traversal via symlinks blocked).
+- Atomic writes (temp-then-rename) for every config + markdown + JSON write.
+- Non-interactive mode for CI (`--non-interactive`, `--yes`, `--dry-run`, `ASOF_NON_INTERACTIVE=1`).
+- Three example wikis lint clean from a fresh checkout on every push.
+- 595 unit + integration tests; init/sync/lint exercised as real subprocesses, with lock-contention coverage.
 
-- Full four-cell **schema-version compatibility matrix**: refuse / read-only / require-`--migrate` / work-as-is. Never auto-migrates silently. Pre-migration backup mandatory.
-- **Concurrency-safe.** `fcntl.flock` on the wiki dir for sync and lint; the change-reminder hook backs off when a sync is running.
-- **Self-ingest hard guard** for Pattern C — sync refuses to recurse into its own wiki dir.
-- **Input sanitization.** Project names slugified; `Path.resolve()` containment check before any write.
-- **Non-interactive mode** for CI / scripted setups (`--non-interactive`, `--yes`, `--dry-run`, `ASOF_NON_INTERACTIVE=1`).
-- **rsync `--safe-links`** by default to avoid path-escape via symlinks.
-- **CI lints all three example wikis on every PR**; schema-version bumps require a migration script + example updates in the same PR.
+## Documentation
 
-See [`PLAN.md`](PLAN.md) for the full design and [`CHANGELOG.md`](CHANGELOG.md) for release notes.
-
-## Contributing
-
-Issues and PRs welcome. The plan is locked but extensible. See [`PLAN.md`](PLAN.md) section 17 for the schema-evolution discipline before proposing schema changes.
+- [`PLAN.md`](PLAN.md) — full design (skill specs, schema, hooks, distribution).
+- [`references/SCHEMA.md`](references/SCHEMA.md) — wiki format spec (frontmatter, page types, time-aware ingest rules).
+- [`skills/init/SKILL.md`](skills/init/SKILL.md), [`skills/sync/SKILL.md`](skills/sync/SKILL.md), [`skills/lint/SKILL.md`](skills/lint/SKILL.md) — per-skill docs.
+- [`CHANGELOG.md`](CHANGELOG.md) — release notes + schema-version semantics.
 
 ## License
 
@@ -138,4 +153,4 @@ MIT. See [`LICENSE`](LICENSE).
 
 ## Credits
 
-Pattern from [Andrej Karpathy's LLM wiki idea](https://gist.github.com/karpathy/d4a35cffd1d23c2ddd6b3c8b1d1b76f2) (the wiki-as-compounding-artifact framing). Time-aware schema, supersession rules, three-pattern wiki dirs, and the skill packaging are this project's contribution.
+The wiki-as-compounding-artifact framing comes from [Andrej Karpathy's gist on a personal LLM wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f). Time-aware schema, supersession rules, the three wiki-dir patterns, and the skill packaging are this project's contribution.
