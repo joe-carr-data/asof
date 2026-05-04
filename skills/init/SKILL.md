@@ -55,10 +55,10 @@ Four optional actions (each interactive yes/no, or driven by flags):
 
 1. **Install the two-file CLAUDE.md / asof-context integration.** Writes the bulk wiki-precedence body to `<project>/.claude/asof-context.md` (sync-excluded by default since `.claude/` is in `DEFAULT_EXCLUDES`), then appends a 3-line marker-fenced `@`-import block to `<project>/CLAUDE.md` that transitively loads the bulk file via Claude Code's session-start memory loader. The two-file split prevents asof's own bootstrap content from being sync-mirrored into the wiki's `raw/` as if it were source. `asof-context.md` is written FIRST (atomicity: if it fails, CLAUDE.md is untouched, so we never end up with a CLAUDE.md importing a missing file). Marker fences make idempotent re-runs safe.
 2. **Install the PostToolUse change-reminder hook** in `<project>/.claude/hooks/asof_wiki_change_reminder.py` — fires after `*.md` edits with a "wiki may now be stale" reminder. Per-project debounced + path-traversal-safe (gpt-5.2-pro round-2 fixes baked in).
-3. **Edit settings file** to register the hook + add `wiki_dir` to `permissions.additionalDirectories` + pre-approve `Read(wiki_dir/**)` and `Write/Edit/MultiEdit(wiki_dir/wiki/**)` in `permissions.allow` (so per-file ingest doesn't trigger Claude Code's permission prompt for every source-summary write — at 50 source files × ~5 writes per ingest, the unpermitted path is unusable). Tight scope: writes are pre-approved only under `wiki/<project>/` — `raw/` (rsync-managed) and root files (init/sync-managed) are NOT pre-approved. **Default target: `.claude/settings.local.json`** (gitignored — machine-portable absolute paths don't end up in commits). `--commit-settings` opts into the committed `.claude/settings.json`.
+3. **Edit settings file** to register the hook + (Pattern A/B) add `wiki_dir` to `permissions.additionalDirectories` + (all patterns) pre-approve `Read(wiki_dir/**)` and project-scoped `Write/Edit/MultiEdit(wiki_dir/wiki/<project_slug>/**)` in `permissions.allow` so per-file ingest doesn't trigger Claude Code's permission prompt for every source-summary write — at 50 source files × ~5 writes per ingest, the unpermitted path is unusable. Tight scope: writes are project-scoped (NOT wiki-wide, so init for project A in a shared Pattern A vault doesn't grant write access to project B's pages); `raw/` (rsync-managed) and root files (init/sync-managed) are NOT pre-approved. **Default target: `.claude/settings.local.json`** (gitignored — machine-portable absolute paths don't end up in commits). `--commit-settings` opts into the committed `.claude/settings.json`.
 4. **Run a first sync** (`asof:sync --project <slug> --non-interactive`) for immediate feedback that the wiki is wired correctly.
 
-Pattern C automatically forces the additional-directories step off (the wiki is already inside the repo).
+For Pattern C, the `additionalDirectories` portion of step 3 is skipped (the wiki is already inside the repo's cwd, so no extra registration is needed for Claude Code to read it). The `permissions.allow` rules still fire for Pattern C — they're what skip the per-file ingest prompts, and that wart applies to all patterns.
 
 ## CLI flags
 
@@ -70,7 +70,7 @@ Pattern C automatically forces the additional-directories step off (the wiki is 
 | `--dry-run` | Report what would happen; don't write to disk. |
 | `--no-install-hook` | Skip stage-5 hook installation. |
 | `--no-claudemd-snippet` | Skip stage-5 CLAUDE.md append. |
-| `--no-additional-directories` | Skip the `permissions.additionalDirectories` edit. |
+| `--no-additional-directories` | Skip BOTH the `permissions.additionalDirectories` edit AND the bundled `permissions.allow` pre-approval rules. (Without these rules, the agent will be prompted to approve every file write during ingest — at scale this makes the plugin unusable, so opt-out is rarely the right choice.) |
 | `--skip-first-sync` | Don't run a first sync at the end. |
 | `--commit-settings` | Write to `.claude/settings.json` (committed) instead of `.claude/settings.local.json` (gitignored). |
 | `--import-existing PATH` | (v1 stub — exits 5) Migrate from a brain-sync layout. |

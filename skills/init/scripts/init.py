@@ -131,8 +131,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--no-additional-directories",
         action="store_true",
-        help="Skip adding the wiki dir to .claude/settings*.json's "
-        "permissions.additionalDirectories.",
+        help="Skip BOTH the wiki-dir registration in "
+        "permissions.additionalDirectories AND the bundled "
+        "permissions.allow rules that pre-approve agent writes "
+        "to wiki/<project>/. Without those allow rules, the agent "
+        "is prompted on every source-summary write during ingest "
+        "(unusable at scale) — opt-out is rarely the right choice.",
     )
     p.add_argument(
         "--skip-first-sync",
