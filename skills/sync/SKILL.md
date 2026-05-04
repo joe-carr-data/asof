@@ -1,7 +1,7 @@
 ---
 name: sync
-description: Sync source repo .md files into the wiki's raw/ dir and detect what changed (NEW / MODIFIED / DELETED). Use when the user says "sync the wiki", "asof sync", "update the wiki", "ingest new docs", "refresh the wiki from <project>", "pull updates into the brain", or when source markdown has changed and the wiki may be stale.
-when_to_use: Trigger phrases — "sync the wiki", "asof sync", "update the wiki", "refresh the wiki", "ingest new docs", "bring the wiki up to date", "pull updates from <project> into the brain", "what changed in the docs". Also fire when a recent .md edit suggests the wiki is now out-of-date.
+description: "Sync source repo .md files into the wiki's raw/ dir and detect what changed (NEW / MODIFIED / DELETED). CRITICAL — when the script reports deltas, the agent MUST decide the ingest strategy via the AskUserQuestion tool (scaled by delta count: 1=just-do-it, 2-5=one structured Q, 6-20=adds 'pause every 10', 20+=adds 'pause every 25 / batch by subdir'), never via prose Q&A in chat. See the AGENT CONTRACT at the top of the body. Use when the user says 'sync the wiki', 'asof sync', 'update the wiki', or when source markdown has changed and the wiki may be stale."
+when_to_use: "Trigger phrases — 'sync the wiki', 'asof sync', 'update the wiki', 'refresh the wiki', 'ingest new docs'. After sync reports deltas, the agent MUST call AskUserQuestion (NOT prose Q&A) to choose the ingest strategy. Body's AGENT CONTRACT specifies the exact options per delta count."
 allowed-tools: Bash(rsync *) Bash(stat *) Bash(find *) Bash(python3 *) Bash(grep *) Bash(diff *) Bash(ls *) Bash(cat *) Bash(jq *) Bash(test *) Read Write Edit AskUserQuestion
 argument-hint: "[project-name (optional)] [--all] [--dry-run] [--summary-only] [--strict-mtime] [--non-interactive] [--auto-select-longest] [--copy-links] [--allow-self]"
 ---
