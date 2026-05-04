@@ -6,15 +6,14 @@ A Claude Code plugin that gives the agent a sense of time across your project's 
 
 ## Install
 
-`asof` ships as a Claude Code plugin. The recommended path is whatever the current Claude Code release documents for plugin install (the marketplace flow is the official channel; see [Claude Code's plugin docs](https://docs.claude.com/en/docs/claude-code/plugins) for the current command).
+In any Claude Code session:
 
-For a manual install against the working tree, clone into the directory Claude Code searches for plugins:
-
-```bash
-git clone https://github.com/joe-carr-data/asof ~/.claude/plugins/asof
+```
+/plugin marketplace add joe-carr-data/asof
+/plugin install asof@joe-carr-data
 ```
 
-Then in any Claude Code session:
+That's it. The plugin auto-discovers from `.claude-plugin/plugin.json` at the repo root — no separate marketplace registration needed. Skills land namespaced under `asof:`, so:
 
 ```
 /asof:init <project-name> <path-to-source-repo>
@@ -24,7 +23,17 @@ A 5-stage wizard handles preflight checks (Python 3.9+, rsync), wiki layout choi
 
 **Zero runtime dependencies beyond Python stdlib + rsync.** No `pip install`, no `npm i`, no `uv sync`.
 
-> If `/asof:init` doesn't appear in your slash-command list after install, your Claude Code build may use a different plugin directory. Run `/help` to see your loaded skills, or check the official plugin docs linked above for the install path your release expects.
+### Local development install
+
+If you've cloned the repo and want to test changes against your own checkout:
+
+```bash
+claude --plugin-dir /path/to/asof
+```
+
+Reload after code changes with `/reload-plugins` — no Claude Code restart needed.
+
+For the full plugin install / publish reference, see [Claude Code's plugin docs](https://code.claude.com/docs/en/plugins.md).
 
 ## Why this exists
 
